@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-"""Package public Skill resources without credentials or local order snapshots."""
+"""Package the real MCP Skill using an explicit runtime-resource allowlist."""
 from pathlib import Path
 import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
-ROOT_FILES = (
-    "README.md", "README.en.md", "SKILL.md", "MCP_INTEGRATION.md", "CONTEST_DECLARATION.md",
-    "mcp-config.example.json", "mcp-config.codex.example.toml", "workbuddy.md", "LICENSE",
+SKILL_FILES = (
+    "SKILL.md", "MCP_INTEGRATION.md", "CONTEST_DECLARATION.md", "LICENSE",
+    "mcp-config.example.json", "mcp-config.codex.example.toml",
+    "docs/GETTING_STARTED.md", "references/mcp_tools.md", "references/data_conventions.md",
+    "scripts/budget_engine.py", "scripts/check_mcp.py", "scripts/real_smoke.py",
+    "scripts/make_qr.py", "scripts/render_card.py", "assets/result_template.html",
 )
 
 
 def main():
-    files = [ROOT / name for name in ROOT_FILES]
-    for folder in ("assets", "demo", "references", "docs"):
-        base = ROOT / folder
-        if base.exists():
-            files.extend(p for p in base.rglob("*") if p.is_file()
-                         and p.suffix.lower() in {".md", ".html", ".json", ".css", ".js", ".png", ".svg"})
-    files.extend(p for p in (ROOT / "scripts").iterdir()
-                 if p.is_file() and p.suffix in {".py", ".js"})
+    files = [ROOT / name for name in SKILL_FILES]
+    missing = [path.relative_to(ROOT).as_posix() for path in files if not path.is_file()]
+    if missing:
+        raise SystemExit("Skill resources missing: " + ", ".join(missing))
     output = ROOT / "dist" / "mcbudget.zip"
     output.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(set(files)):
+        for path in files:
             archive.write(path, "mcbudget/" + path.relative_to(ROOT).as_posix())
-    print(output)
+    print(f"{output} ({len(files)} runtime resources)")
     return 0
 
 

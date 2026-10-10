@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>McBudget · 真实预算挑战卡</title>
+<style>
+:root{color-scheme:light;--red:#DA291C;--ink:#30231F;--muted:#73665C;--paper:#FFF9EF;--line:#EBDFCD}
+*{box-sizing:border-box}body{margin:0;padding:28px 16px 40px;background:var(--paper);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Microsoft YaHei",sans-serif}.wrap{max-width:920px;margin:auto}header{padding:24px;border-radius:20px;background:var(--red);color:#fff}h1{font-size:28px;margin:0 0 6px}header p{margin:0;opacity:.94}.badge{display:inline-block;margin-top:12px;border-radius:20px;padding:4px 12px;background:#FFE17E;color:#604800;font-weight:700;font-size:13px}h2{margin:26px 0 12px;font-size:20px}.tiers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.tier{background:#fff;padding:16px;border:1px solid var(--line);border-radius:16px}.tier.selected{border:2px solid var(--red);padding:15px}.tier h3{margin:0;color:var(--red);font-size:17px}.tier .limit{font-size:13px;color:var(--muted)}.tier .amount{font-size:26px;font-weight:800;overflow-wrap:anywhere}.tier .state{font-size:12px;color:var(--muted)}.panel{margin-top:16px;padding:22px;background:#fff;border:1px solid var(--line);border-radius:18px}.select-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.select-row h2{margin:0}select{padding:8px 12px;background:#fff;border:1px solid var(--line);border-radius:10px;font:inherit;max-width:100%}.food{padding:12px 0;border-bottom:1px dashed var(--line)}.food b{font-size:16px;overflow-wrap:anywhere}.food p{font-size:13px;color:var(--muted);margin:3px 0 0;overflow-wrap:anywhere}.money-row{display:flex;justify-content:space-between;gap:12px;padding:4px 0}.money-row span:last-child{font-weight:600;overflow-wrap:anywhere}.money-row.total{font-size:22px;font-weight:800;color:var(--red);margin-top:6px;border-top:1px solid var(--line);padding-top:10px}.time{font-size:12px;color:var(--muted);overflow-wrap:anywhere}.delta p{margin:6px 0;color:var(--muted);font-size:14px;overflow-wrap:anywhere}.delta h3{font-size:15px;margin:0}.card-wrap{max-width:560px;margin:16px auto}canvas{display:block;width:100%;height:auto;border-radius:14px;background:white;box-shadow:0 5px 24px #47250c15}.actions{text-align:center}button{border:0;padding:13px 24px;border-radius:12px;background:var(--red);color:white;font:700 16px/1.3 inherit;cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #FFC72C;outline-offset:3px}footer{font-size:12px;color:var(--muted);margin-top:22px}footer p{margin:4px 0}.error{color:#B7221A;font-weight:700}
+@media(max-width:560px){body{padding:12px 10px 28px}header{padding:20px}h1{font-size:23px}.tiers{grid-template-columns:1fr}.tier{display:grid;grid-template-columns:1fr auto;gap:0 12px}.tier .amount{grid-column:2;grid-row:1/3;font-size:24px}.tier .state{grid-column:1/-1}.panel{padding:16px}.money-row.total{font-size:20px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header><h1>💰 麦麦预算挑战 · McBudget</h1><p>预算有选择，餐单有依据。</p><span class="badge">真实核价 · 以重新核价为准</span></header>
+  <h2>📊 我的预算阶梯</h2><div id="tiers" class="tiers"></div>
+  <section class="panel"><div class="select-row"><h2>🍔 本次选择</h2><label>档位 <select id="selectedTier" aria-label="选择已核价档位"></select></label></div><div id="foods"></div><div id="amounts"></div><p id="quoteTime" class="time"></p></section>
+  <div id="deltas"></div>
+  <h2>🖼️ 我的真实挑战卡</h2><p class="time">卡片只包含预算、餐单和核价金额，可保存后分享。</p>
+  <div class="card-wrap"><canvas id="challengeCard" aria-label="真实预算挑战卡" role="img"></canvas></div>
+  <div class="actions"><button id="downloadCard" type="button">保存 PNG 挑战卡</button></div>
+  <p id="error" class="error" role="alert"></p>
+  <footer><p>真实核价记录仅代表标注时间的结果；提交订单前须使用当前门店、购物车及优惠重新核价。</p><p>McBudget 为独立开发作品，非麦当劳官方产品。本页不执行领券、下单或支付。</p></footer>
+</main>
+<script id="resultData" type="application/json">__MCBUDGET_REAL_RESULT_JSON__</script>
+<script>
+'use strict';
+(() => {
+  const data = JSON.parse(document.getElementById('resultData').textContent);
+  const priced = data.tiers.filter(t => t.status === 'priced');
+  const methods = {pickup:'到店取餐',dt:'得来速',delivery:'麦乐送'};
+  const select = document.getElementById('selectedTier');
+  const money = value => {
+    const whole = Math.trunc(value / 100);
+    const decimal = value % 100;
+    return String(whole) + (decimal ? '.' + String(decimal).padStart(2,'0').replace(/0$/,'') : '');
+  };
+  const node = (tag, value, className) => {const element=document.createElement(tag);if(value!==undefined)element.textContent=value;if(className)element.className=className;return element;};
+  const time = value => value.replace('T',' ').replace(/\+00:00$/,' UTC');
+  priced.forEach(t => {const option=node('option',t.label+' · 预算 ¥'+money(t.budget_cents));option.value=t.label;select.appendChild(option);});
+  select.value=data.selected_tier;
+  data.deltas.forEach(delta => {const panel=node('section',undefined,'panel delta');panel.appendChild(node('h3',delta.from+' → '+delta.to+'：预算改变了什么'));delta.explanation.forEach(line=>panel.appendChild(node('p',line)));document.getElementById('deltas').appendChild(panel);});
+
+  function render() {
+    const chosen=priced.find(t=>t.label===select.value);
+    if(!chosen)throw new Error('所选档位没有成功的官方核价');
+    document.getElementById('tiers').replaceChildren();
+    data.tiers.forEach(t=>{const box=node('article',undefined,'tier'+(t.label===chosen.label?' selected':''));box.appendChild(node('h3',t.label));box.appendChild(node('div','预算 ¥'+money(t.budget_cents),'limit'));box.appendChild(node('div',t.status==='priced'?'¥'+money(t.quote.payable_cents):'暂不可选','amount'));box.appendChild(node('div',t.status==='priced'?'官方核价 · '+methods[data.order_type]:'未获得预算内的官方核价方案','state'));document.getElementById('tiers').appendChild(box);});
+    const foods=document.getElementById('foods');foods.replaceChildren();
+    chosen.cart.forEach(food=>{const row=node('div',undefined,'food');row.appendChild(node('b',food.name+' ×'+food.qty));if(food.combo_items.length)row.appendChild(node('p','组成：'+food.combo_items.map(part=>part.name+' ×'+part.qty).join('、')));foods.appendChild(row);});
+    const amounts=document.getElementById('amounts');amounts.replaceChildren();
+    [['商品金额',chosen.quote.product_cents],['优惠',chosen.quote.discount_cents],['配送及打包费',chosen.quote.delivery_cents],['应付金额',chosen.quote.payable_cents],['预算结余',chosen.budget_cents-chosen.quote.payable_cents]].forEach(([label,value],index)=>{const row=node('div',undefined,'money-row'+(index===3?' total':''));row.appendChild(node('span',label));row.appendChild(node('span',(index===1?'−':'')+'¥'+money(value)));amounts.appendChild(row);});
+    document.getElementById('quoteTime').textContent='核价时间：'+time(chosen.quote.quoted_at)+' · '+methods[data.order_type];
+    drawCard(chosen);
+  }
+
+  function drawCard(chosen) {
+    const canvas=document.getElementById('challengeCard');
+    canvas.width=750;
+    let ctx=canvas.getContext('2d');
+    const fontFamily='"Microsoft YaHei", "PingFang SC", sans-serif';
+    function font(size,weight=400){ctx.font=weight+' '+size+'px '+fontFamily;}
+    function lines(value,maxWidth,size,weight=400){font(size,weight);const output=[];let line='';for(const character of Array.from(value)){if(line&&ctx.measureText(line+character).width>maxWidth){output.push(line);line=character;}else line+=character;}if(line)output.push(line);return output;}
+    const foodLines=chosen.cart.map(food=>({name:lines(food.name+' ×'+food.qty,662,29,700),parts:food.combo_items.length?lines('组成：'+food.combo_items.map(part=>part.name+' ×'+part.qty).join('、'),662,23):[]}));
+    const selectedDeltas=data.deltas.filter(delta=>delta.from===chosen.label||delta.to===chosen.label).map(delta=>({title:delta.from+' → '+delta.to,lines:delta.explanation.flatMap(line=>lines(line,662,23))}));
+    const foodsHeight=foodLines.reduce((sum,food)=>sum+food.name.length*40+food.parts.length*33+24,0);
+    const deltaHeight=selectedDeltas.reduce((sum,delta)=>sum+44+delta.lines.length*33+18,0);
+    const quoteLines=lines('核价时间：'+time(chosen.quote.quoted_at),662,21);
+    canvas.height=979+foodsHeight+deltaHeight+quoteLines.length*29;
+    ctx=canvas.getContext('2d');
+    const height=canvas.height;
+    function write(value,x,y,size=26,weight=400,color='#30231F'){font(size,weight);ctx.fillStyle=color;ctx.textBaseline='alphabetic';ctx.fillText(value,x,y);}
+    function fit(value,maxWidth,size,weight=400){font(size,weight);while(ctx.measureText(value).width>maxWidth&&size>12){size-=1;font(size,weight);}return size;}
+    function line(y){ctx.strokeStyle='#EADFCB';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(44,y);ctx.lineTo(706,y);ctx.stroke();}
+    function row(label,value,y,total=false){write(label,44,y,total?29:25,total?700:400,total?'#DA291C':'#73665C');const size=fit(value,365,total?33:26,total?800:600);font(size,total?800:600);const width=ctx.measureText(value).width;write(value,706-width,y,size,total?800:600,total?'#DA291C':'#30231F');}
+    ctx.fillStyle='#FFF9EF';ctx.fillRect(0,0,750,height);
+    ctx.fillStyle='#DA291C';ctx.fillRect(0,0,750,168);
+    write('麦麦预算挑战',44,64,39,800,'#FFFFFF');write('McBudget · 真实核价记录',44,110,25,500,'#FFFFFF');
+    write('以重新核价为准',44,144,21,400,'#FFE17E');
+    write('选定 '+chosen.label+' 档 · '+methods[data.order_type],44,220,26,600,'#73665C');
+    write('预算上限 ¥'+money(chosen.budget_cents),44,263,fit('预算上限 ¥'+money(chosen.budget_cents),662,31,600),600);
+    write('官方核价应付',44,310,24,500,'#73665C');
+    const payment='¥'+money(chosen.quote.payable_cents);write(payment,44,405,fit(payment,662,84,800),800,'#DA291C');
+    write('预算结余 ¥'+money(chosen.budget_cents-chosen.quote.payable_cents),44,448,fit('预算结余 ¥'+money(chosen.budget_cents-chosen.quote.payable_cents),662,25,500),500,'#1F7A3D');
+    let y=478;
+    const tierWidth=216;
+    data.tiers.forEach((tier,index)=>{const x=44+index*223;ctx.fillStyle=tier.label===chosen.label?'#FFF0C1':'#FFFFFF';ctx.fillRect(x,y,tierWidth,99);write(tier.label,x+12,y+31,23,700,'#DA291C');const value=tier.status==='priced'?'¥'+money(tier.quote.payable_cents):'暂无核价方案';write(value,x+12,y+71,fit(value,tierWidth-24,28,700),700,tier.status==='priced'?'#30231F':'#73665C');});
+    y+=134;write('本次餐单',44,y,29,800);y+=47;
+    foodLines.forEach(food=>{food.name.forEach(value=>{write(value,44,y,29,700);y+=40;});food.parts.forEach(value=>{write(value,44,y,23,400,'#73665C');y+=33;});y+=12;line(y);y+=12;});
+    y+=12;row('商品金额','¥'+money(chosen.quote.product_cents),y);y+=38;row('优惠','−¥'+money(chosen.quote.discount_cents),y);y+=38;row('配送及打包费','¥'+money(chosen.quote.delivery_cents),y);y+=43;row('应付金额','¥'+money(chosen.quote.payable_cents),y,true);y+=35;line(y);y+=40;
+    selectedDeltas.forEach(delta=>{write(delta.title+' · 预算改变了什么',44,y,25,700,'#DA291C');y+=40;delta.lines.forEach(value=>{write(value,44,y,23,400,'#73665C');y+=33;});y+=22;});
+    quoteLines.forEach(value=>{write(value,44,y,21,400,'#73665C');y+=29;});
+    // Height follows content, never a fixed crop or hidden overflow.
+    const usedHeight=Math.ceil(y+114);
+    if(usedHeight!==canvas.height){const snapshot=ctx.getImageData(0,0,750,Math.min(usedHeight,canvas.height));canvas.height=usedHeight;ctx=canvas.getContext('2d');ctx.fillStyle='#FFF9EF';ctx.fillRect(0,0,750,usedHeight);ctx.putImageData(snapshot,0,0);}
+    ctx.fillStyle='#DA291C';ctx.fillRect(0,canvas.height-84,750,84);
+    write('真实核价 · 以重新核价为准',44,canvas.height-49,23,700,'#FFFFFF');write('McBudget · 独立开发作品 · 非官方产品',44,canvas.height-17,20,400,'#FFFFFF');
+    window.mcBudgetCard={data,drawCard,selected:chosen.label};
+  }
+  select.addEventListener('change',()=>{try{render();}catch(error){document.getElementById('error').textContent=error.message;}});
+  document.getElementById('downloadCard').addEventListener('click',()=>{const anchor=document.createElement('a');anchor.download='McBudget-'+select.value+'-真实核价.png';anchor.href=document.getElementById('challengeCard').toDataURL('image/png');anchor.click();});
+  try{render();}catch(error){document.getElementById('error').textContent='无法生成挑战卡：'+error.message;document.getElementById('downloadCard').disabled=true;}
+})();
+</script>
+</body>
+</html>

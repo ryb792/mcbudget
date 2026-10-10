@@ -17,6 +17,7 @@ from contextlib import redirect_stdout
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import budget_engine as be  # noqa: E402
+import demo_engine as de  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SAMPLE_PATH = os.path.join(HERE, "..", "assets", "sample_data.json")
@@ -61,7 +62,7 @@ def demo_ctx(sample, budget_yuan, order_type="pickup", prefs=None, excluded=None
 
 def real_ctx(sample, budget_yuan, order_type="pickup", prefs=None, excluded=None, must=None, quote_fn=None):
     ctx = demo_ctx(sample, budget_yuan, order_type, prefs, excluded, must)
-    ctx["sample"] = None
+    ctx.pop("sample")
     ctx["delivery_fee_cents"] = 900
     return ctx, quote_fn
 
@@ -99,19 +100,19 @@ def _plain(m, qty=1):
     return {"code": m["code"], "name": m["name"], "qty": qty, "price_cents": m["price_cents"], "category": m["category"], "tags": list(m.get("tags", [])), "combo_items": m.get("combo_items", [])}
 
 
-exact = be.demo_price_cart([_plain(m_yu), _plain(m_pai2)], sample)
+exact = de.demo_price_cart([_plain(m_yu), _plain(m_pai2)], sample)
 check("存在恰好 2000 分的可行组合（麦香鱼+菠萝派）", exact["product_cents"] == 2000 and exact["discount_cents"] == 0 and exact["payable_cents"] == 2000 + exact["delivery_cents"], str(exact))
 
-r = be.build_ladder(demo_ctx(sample, 20))
+r = de.build_ladder(demo_ctx(sample, 20))
 t_low = r["tiers"][1]  # B = 2000 分（20 元档）
 check("B=20元 档位方案不超预算", t_low.get("plan") and t_low["plan"]["quote"]["payable_cents"] <= 2000, json.dumps(t_low, ensure_ascii=False)[:200])
 
-r2 = be.build_ladder(demo_ctx(sample, 19.99))
+r2 = de.build_ladder(demo_ctx(sample, 19.99))
 check("预算少一分则 B 档不含该方案", all(
     not t.get("plan") or t["plan"]["quote"]["payable_cents"] <= t["budget_cents"] for t in r2["tiers"]
 ), "所有展示方案不得超过对应档位预算")
 
-r3 = be.build_ladder(demo_ctx(sample, 23, order_type="delivery"))
+r3 = de.build_ladder(demo_ctx(sample, 23, order_type="delivery"))
 t = r3["tiers"][1]  # B = 2300
 check("外送 23 元档位无方案或含配送费不超预算", (t["status"] == "unsolvable" and t["gap_cents"] is not None and t["gap_cents"] > 0) or t["plan"]["quote"]["payable_cents"] <= 2300, json.dumps(t, ensure_ascii=False)[:200])
 if t["status"] == "unsolvable":
@@ -130,35 +131,35 @@ m_kele = next(i for i in sample["menu"] if i["code"] == "4001")
 m_pai = next(i for i in sample["menu"] if i["code"] == "3003")
 
 # 1650 单买：不满 K2 门槛(2500)，K1 命中 → 减 300
-pq_single = be.demo_price_cart([mk(m_mala)], sample)
+pq_single = de.demo_price_cart([mk(m_mala)], sample)
 check("K1 单品立减（1650-300）", pq_single["discount_cents"] == 300 and pq_single["payable_cents"] == 1350 + 900, str(pq_single))
 
 # 1650+950=2600：K2(400) 优于 K1(300) → 取最优单券
-pq_combo = be.demo_price_cart([mk(m_mala), mk(m_kele)], sample)
+pq_combo = de.demo_price_cart([mk(m_mala), mk(m_kele)], sample)
 check("最优单券取 K2（2600-400）", pq_combo["discount_cents"] == 400 and pq_combo["payable_cents"] == 2200 + 900, str(pq_combo))
 
 # 两份小食 1600：K3 只减一次
-pq_two = be.demo_price_cart([mk(m_pai, 2)], sample)
+pq_two = de.demo_price_cart([mk(m_pai, 2)], sample)
 check("双份命中 K3 仍只减一次", pq_two["discount_cents"] == 200, str(pq_two))
 check("同一券不在多件上重复扣减", pq_two["discount_cents"] != 400)
 
-r4 = be.build_ladder(demo_ctx(sample, 25))
+r4 = de.build_ladder(demo_ctx(sample, 25))
 p25 = r4["tiers"][1]
 check("25 元档位有方案且不超预算", p25.get("plan") and p25["plan"]["quote"]["payable_cents"] <= 2500, json.dumps(p25, ensure_ascii=False)[:160])
 # 券跨档（候选级验证）：麦辣+可乐 2600 分无券超 25 元预算，用券后进入预算内
 cands25 = be.generate_candidates(sample["menu"], ["麦辣"], [], [])
 target = next(c for c in cands25 if be.cart_signature(c) == "1002x1;4001x1")
-tq = be.demo_price_cart(target, sample)
+tq = de.demo_price_cart(target, sample)
 check("券使候选跨入预算档位（2600→2200≤2500）", tq["payable_cents"] - tq["delivery_cents"] <= 2500 and tq["discount_cents"] > 0, str(tq))
 
 sample_nok1 = copy.deepcopy(sample)
 sample_nok1["coupons"] = [c for c in sample_nok1["coupons"] if c["id"] != "K1"]
-r5 = be.build_ladder(demo_ctx(sample_nok1, 25))
+r5 = de.build_ladder(demo_ctx(sample_nok1, 25))
 check("券失效后不再出现该优惠", all((not t.get("plan")) or t["plan"]["quote"].get("coupon") != "麦辣鸡腿堡立减3元" for t in r5["tiers"]))
 
 # ---------------------------------------------------------------------------
 print("[4] 候选控制（去重/上限/报价次数）")
-r6 = be.build_ladder(demo_ctx(sample, 25))
+r6 = de.build_ladder(demo_ctx(sample, 25))
 check("候选数 ≤ 30", r6["meta"]["candidate_count"] <= 30, str(r6["meta"]["candidate_count"]))
 cands = be.generate_candidates(sample["menu"], [], [], [])
 sigs = [be.cart_signature(c) for c in cands]
@@ -181,11 +182,11 @@ def failing_quote(cart):
     return None
 ctx_f, qf2 = real_ctx(sample, 25, quote_fn=failing_quote)
 r8 = be.build_ladder(ctx_f, quote_fn=qf2)
-check("核价全失败：无 priced 方案冒充", all(
-    (not t.get("plan")) or t["plan"]["status"] in ("estimated",) for t in r8["tiers"]
+check("核价全失败：不产生代表方案", all(
+    not t.get("plan") for t in r8["tiers"]
 ), json.dumps([(t.get("plan") or {}).get("status") for t in r8["tiers"]], ensure_ascii=False))
-check("核价全失败：未核价方案必须带待核价说明", all(
-    (not t.get("plan")) or t["plan"]["status"] == "estimated" for t in r8["tiers"]
+check("核价全失败：明确提示不能判断预算内方案", all(
+    t["status"] == "quote_failed" and "官方报价" in t["note"] for t in r8["tiers"]
 ))
 
 def flaky_quote(cart):
@@ -193,35 +194,35 @@ def flaky_quote(cart):
 ctx_h, qf3 = real_ctx(sample, 25, quote_fn=flaky_quote)
 r9 = be.build_ladder(ctx_h, quote_fn=qf3)
 check("部分核价失败：失败方案不作为代表展示", all(
-    (not t.get("plan")) or t["plan"]["status"] in ("priced", "estimated") for t in r9["tiers"]
+    (not t.get("plan")) or t["plan"]["status"] == "priced" for t in r9["tiers"]
 ), json.dumps([(t.get("plan") or {}).get("status") for t in r9["tiers"]], ensure_ascii=False))
 
 # ---------------------------------------------------------------------------
 print("[5] 预算阶梯语义（低预算/高档沿用/状态标记）")
-r10 = be.build_ladder(demo_ctx(sample, 5))
+r10 = de.build_ladder(demo_ctx(sample, 5))
 t0 = r10["tiers"][0]
 check("低预算无方案", t0["status"] == "unsolvable", json.dumps(t0, ensure_ascii=False)[:160])
 check("报告最低候选与差额", t0["min_candidate"] is not None and t0["gap_cents"] == t0["min_candidate"]["quote"]["payable_cents"] - 500, str(t0.get("gap_cents")))
 
-r11 = be.build_ladder(demo_ctx(sample, 25, prefs=["咖啡"], excluded=["咖啡"], must=["麦香鱼"]))
+r11 = de.build_ladder(demo_ctx(sample, 25, prefs=["咖啡"], excluded=["咖啡"], must=["麦香鱼"]))
 carry = [t for t in r11["tiers"] if t.get("plan") and t.get("carry_over_from")]
 check("高档位可沿用同一方案并标记", isinstance(carry, list))  # 结构可用性（是否触发取决于样例数据）
 check("演示模式状态全部为 demo_sample", all(t.get("plan") is None or t["plan"]["status"] in ("demo_sample",) for t in r11["tiers"]))
 
-r12 = be.build_ladder(demo_ctx(sample, 25))
+r12 = de.build_ladder(demo_ctx(sample, 25))
 check("演示三档默认为 B-5/B/B+5", [t["label"] for t in r12["tiers"]] == ["B-5", "B", "B+5"], str([t["label"] for t in r12["tiers"]]))
 check("三档共享同一候选上下文（无额外报价）", r12["meta"]["quote_calls"] == 0)
 
-r13 = be.build_ladder(demo_ctx(sample, 3))
+r13 = de.build_ladder(demo_ctx(sample, 3))
 check("非正数档位省略（B-5=负数被丢弃）", [t["label"] for t in r13["tiers"]] == ["B", "B+5"], str([t["label"] for t in r13["tiers"]]))
 
 # ---------------------------------------------------------------------------
 print("[6] 偏好/排除/必选")
-r14 = be.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"]))
+r14 = de.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"]))
 plan14 = r14["tiers"][1]["plan"]
 check("偏好命中鸡肉", "鸡肉" in "".join(i["name"] + "".join(i.get("tags", [])) for i in plan14["cart"]), json.dumps(plan14["cart"], ensure_ascii=False)[:120])
 
-r15 = be.build_ladder(demo_ctx(sample, 35, order_type="delivery", excluded=["咖啡"]))
+r15 = de.build_ladder(demo_ctx(sample, 35, order_type="delivery", excluded=["咖啡"]))
 all_codes = [i["code"] for t in r15["tiers"] if t.get("plan") for i in t["plan"]["cart"]]
 check("排除项生效（无咖啡）", "4003" not in all_codes, str(all_codes))
 check("外送计入配送费", any(t.get("plan") and t["plan"]["quote"]["delivery_cents"] == 900 for t in r15["tiers"]), json.dumps([(t.get("plan") or {}).get("quote") for t in r15["tiers"]], ensure_ascii=False)[:200])
@@ -237,7 +238,7 @@ print("[7] 套餐组成与解释")
 combo = next(i for i in sample["menu"] if i["code"] == "2001")
 check("套餐组成完整（3 项）", len(combo["combo_items"]) == 3)
 
-r18 = be.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"]))
+r18 = de.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"]))
 deltas = r18["deltas"]
 check("相邻档位生成解释", len(deltas) >= 1)
 if deltas:
@@ -247,8 +248,8 @@ if deltas:
 
 # ---------------------------------------------------------------------------
 print("[8] 确定性")
-sa = be.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"], excluded=["咖啡"]))
-sb = be.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"], excluded=["咖啡"]))
+sa = de.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"], excluded=["咖啡"]))
+sb = de.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"], excluded=["咖啡"]))
 check("同输入两次输出完全一致", json.dumps(sa, ensure_ascii=False, sort_keys=True) == json.dumps(sb, ensure_ascii=False, sort_keys=True))
 
 # ---------------------------------------------------------------------------
@@ -310,32 +311,32 @@ check("coverage：单买+小食+饮=3", be.coverage_score([mk(m_yu), mk(m_pai), 
 check("pref：套餐按组成命中偏好（真实菜单无 tags 也生效）", be.pref_hits(mk(m_combo_mala), ["麦辣"]) >= 1)
 check("pref：小食/饮品命中不计入偏好（仅主餐口径）", be.pref_hits(mk(next(i for i in sample["menu"] if i["code"] == "3001")), ["鸡肉"]) == 0)
 
-r19 = be.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"]))
+r19 = de.build_ladder(demo_ctx(sample, 25, prefs=["鸡肉"]))
 plan19 = r19["tiers"][1]["plan"]
 check("25元+想吃鸡肉：B 档优先推荐套餐", plan19["cart"][0]["category"] == "combo", json.dumps(plan19["cart"], ensure_ascii=False)[:120])
 check("套餐方案实付 ¥22.5（券后）", plan19["quote"]["payable_cents"] == 2250, str(plan19["quote"]))
 
-r20 = be.build_ladder(demo_ctx(sample, 25))
+r20 = de.build_ladder(demo_ctx(sample, 25))
 plan20 = r20["tiers"][1]["plan"]
 check("无偏好时 B 档同样套餐优先（性价比）", plan20["cart"][0]["category"] == "combo", json.dumps(plan20["cart"], ensure_ascii=False)[:120])
 
-r21 = be.build_ladder(demo_ctx(sample, 20))
+r21 = de.build_ladder(demo_ctx(sample, 20))
 plan21 = r21["tiers"][1]["plan"]
 check("20元档套餐不可行时回落最优单点组合", plan21["quote"]["payable_cents"] <= 2000, str(plan21["quote"]))
 
-r22 = be.build_ladder(demo_ctx(sample, 30, prefs=["鸡肉"]))
+r22 = de.build_ladder(demo_ctx(sample, 30, prefs=["鸡肉"]))
 b22, p22 = r22["tiers"][0]["plan"], r22["tiers"][1]["plan"]
 b25, p25b = r22["tiers"][2]["plan"], r22["tiers"][2]["plan"]
 check("30元预算：B-5 可行时 B 档升级为覆盖更高的套餐（非沿用）", p22["cart"][0]["category"] == "combo" or p22["quote"]["payable_cents"] > b22["quote"]["payable_cents"], json.dumps([b22["quote"], p22["quote"]], ensure_ascii=False)[:200])
 
 # ---------------------------------------------------------------------------
 print("[12] 就餐方式前置（pickup/dt/delivery，先定方式再选餐）")
-check("引擎拒绝未知就餐方式", _raises(lambda: be.build_ladder({**demo_ctx(sample, 25), "order_type": "堂食"})))
-r23 = be.build_ladder(demo_ctx(sample, 35, order_type="dt"))
+check("引擎拒绝未知就餐方式", _raises(lambda: de.build_ladder({**demo_ctx(sample, 25), "order_type": "堂食"})))
+r23 = de.build_ladder(demo_ctx(sample, 35, order_type="dt"))
 t23 = r23["tiers"][1]
 check("dt（得来速）与到店同为 0 配送费", t23.get("plan") and t23["plan"]["quote"]["delivery_cents"] == 0, str(t23.get("plan", {}).get("quote")))
 check("dt 输出标记 order_type=dt", r23["order_type"] == "dt")
-r24 = be.build_ladder(demo_ctx(sample, 35, order_type="delivery"))
+r24 = de.build_ladder(demo_ctx(sample, 35, order_type="delivery"))
 p_pick = r23["tiers"][1]["plan"]["quote"]["payable_cents"]
 check("同预算 dt 与 delivery 应付不同（外送含配送费）", r24["tiers"][1].get("plan") and r24["tiers"][1]["plan"]["quote"]["payable_cents"] >= p_pick, "")
 
@@ -346,7 +347,7 @@ regression_menu = [
      "combo_items": [{"name": "测试组成"}] * (10 if i == 12 else 1)}
     for i in range(13)
 ]
-regression_ctx = {"budget_cents": 2500, "order_type": "pickup", "sample": None,
+regression_ctx = {"budget_cents": 2500, "order_type": "pickup",
                   "menu": regression_menu, "prefs": [], "excluded": [], "must": []}
 
 
@@ -416,6 +417,40 @@ for probe_name, probe_body, probe_status in probe_cases:
     check(probe_name, probe_result["status"] == probe_status)
 
 # ---------------------------------------------------------------------------
+print("[15] 安装的 Skill 只接受真实核价回调")
+check("未传回调明确拒绝计算", _raises(lambda: be.build_ladder(regression_ctx)))
+check("传入不可调用回调明确拒绝计算", _raises(lambda: be.build_ladder(regression_ctx, quote_fn={})))
+check("虚构 sample 即使有回调也拒绝进入真实核心", _raises(lambda: be.build_ladder(demo_ctx(sample, 25), regression_quote)))
+check("mode=demo 拒绝进入真实核心", _raises(lambda: be.build_ladder({**regression_ctx, "mode": "demo"}, regression_quote)))
+fake_callback_ctx, _ = real_ctx(sample, 25)
+fake_callback_result = be.build_ladder(fake_callback_ctx, lambda cart: de.demo_price_cart(cart, sample))
+check("演示适配器报价不能成为真实代表方案", all(not t.get("plan") and t["status"] == "quote_failed" for t in fake_callback_result["tiers"]))
+for bad_name, bad_quote in (
+    ("菜单估算", {"product_cents": 1000, "discount_cents": 0, "delivery_cents": 0, "payable_cents": 1000, "estimated": True}),
+    ("不自洽金额", {"product_cents": 1000, "discount_cents": 0, "delivery_cents": 0, "payable_cents": 999}),
+    ("缺失金额字段", {"payable_cents": 0}),
+    ("小数分金额", {"product_cents": 1000.5, "discount_cents": 0, "delivery_cents": 0, "payable_cents": 1000.5}),
+    ("estimated 状态", {"product_cents": 1000, "discount_cents": 0, "delivery_cents": 0, "payable_cents": 1000, "status": "estimated"}),
+    ("quote_failed 状态", {"product_cents": 1000, "discount_cents": 0, "delivery_cents": 0, "payable_cents": 1000, "status": "quote_failed"}),
+    ("estimated 来源", {"product_cents": 1000, "discount_cents": 0, "delivery_cents": 0, "payable_cents": 1000, "source": "estimated"}),
+):
+    bad_result = be.build_ladder(regression_ctx, lambda cart: bad_quote)
+    check(f"{bad_name} 不用于预算判断", all(not t.get("plan") for t in bad_result["tiers"]))
+captured = []
+
+
+def capture_cart(cart):
+    captured.append(be.cart_signature(cart))
+    return None
+
+
+captured_result = be.build_ladder(regression_ctx, capture_cart)
+check("两阶段捕获只生成最多12个待核价购物车", len(captured) == 12 and len(set(captured)) == 12)
+check("两阶段第一遍无真实推荐", all(not t.get("plan") for t in captured_result["tiers"]))
+quote_cache = {sig: regression_quote([]) for sig in captured}
+cached_result = be.build_ladder(regression_ctx, lambda cart: quote_cache.get(be.cart_signature(cart)))
+check("两阶段官方报价缓存与直接回调一致", cached_result == regression_priced)
+
 print()
 if FAIL:
     print(f"结果：{PASS} 通过，{len(FAIL)} 失败 -> {FAIL}")

@@ -1,90 +1,98 @@
-# MCP_INTEGRATION —— McBudget 与麦当劳 MCP 的集成说明
+# McBudget 与麦当劳 MCP 的集成说明
 
 ## 1. 使用的 MCP Server
 
 | 项 | 值 |
-|----|----|
+| --- | --- |
 | 服务 | 麦当劳中国 MCP（官方远程托管） |
 | 地址 | `https://mcp.mcd.cn` |
 | 协议 | Streamable HTTP |
-| 认证 | `Authorization: Bearer <MCP Token>`（Token 由用户在 open.mcd.cn 申请，仅存于客户端本地配置或环境变量） |
-| 限流 | 600 次/分钟（429 = 超限） |
-| 配置样例 | `mcp-config.example.json`（JSON 客户端）与 `mcp-config.codex.example.toml`（Codex），仅环境变量占位符或引用 |
+| 认证 | `Authorization: Bearer <MCP Token>`；用户在 [开放平台](https://open.mcd.cn)申请，Token 仅存于本机配置或环境变量 |
+| 限流 | 600 次/分钟；429 表示超限 |
+| 配置样例 | `mcp-config.example.json` 与 `mcp-config.codex.example.toml`，仅含占位符或环境变量引用 |
 
-## 2. 实际使用的工具与用途
+Skill 只使用真实 MCP 数据。未连接时按 [安装指引](docs/GETTING_STARTED.md)配置并验证，不生成替代餐单或报价。调用前发现当前客户端中的工具名与 schema；工具名前缀和字段以当前服务为准。
+
+## 2. 工具与调用时机
 
 | 工具 | 用途 | 调用时机 |
-|------|------|----------|
-| `now-time-info` | 获取当前时间，判定时段/预约 | 流程开始（需要时） |
-| `query-nearby-stores` | 到店场景找门店（beType=1 到店 / 5 得来速） | 缺门店时 |
-| `delivery-query-addresses` | 拉取账号已有配送地址 | 外送缺地址时 |
-| `delivery-query-stores` | 按 addressId 查可配门店（beType=2） | 外送选门店 |
-| `query-meals` | 当前门店菜单（分类/编码/价格/随单购） | 构建候选前 |
-| `query-meal-detail` | 套餐组成与特制结构 | 展示套餐组成/用户要求换子项时 |
-| `query-store-coupons` | 当前门店+方式可用券 | 构建候选前/领券后 |
-| `available-coupons` / `auto-bind-coupons` / `query-my-coupons` | 麦麦省券查询/一键领券/我的券 | **仅用户要求领券时** |
-| `calculate-price` | 官方算价（含配送费/优惠/餐具费） | 每轮 ≤12 个去重购物车；下单前必算 |
-| `create-order` | 创建订单 | 用户确认后，且算价未失效 |
-| `query-order` / `order-list` | 核实订单状态 | 创建超时/结果不明确时；用户查进度 |
+| --- | --- | --- |
+| `now-time-info` | 当前时间与时段上下文 | 流程开始，需要时 |
+| `query-nearby-stores` | 找到店或得来速门店 | 缺门店时；beType=1 到店、5 得来速 |
+| `delivery-query-addresses` | 获取账户已有配送地址 | 外送缺地址时 |
+| `delivery-query-stores` | 按 addressId 查可配门店 | 外送选择门店；beType=2 |
+| `query-meals` | 获取当前门店菜单 | 构建候选前 |
+| `query-meal-detail` | 套餐轮次、默认子项与特制结构 | 构建完整套餐或用户要求调整时 |
+| `query-store-coupons` | 当前门店与方式可用券 | 构建候选前、领券后 |
+| `available-coupons` / `auto-bind-coupons` / `query-my-coupons` | 查询可领券、领取券与查询我的券 | **领取只在用户请求或确认后执行** |
+| `calculate-price` | 官方算价，含优惠与相关费用 | 每轮最多 12 个去重购物车；下单前重新算价 |
+| `create-order` | 创建真实订单 | 用户确认后，且最终算价仍适用 |
+| `query-order` / `order-list` | 核实订单与查看进度 | 创建结果不明确时、用户要求查进度时 |
 
-不在 V1 主路径：营养列表、团餐助餐、积分/商城/抽奖/主题活动、`delivery-create-address`（仅用户要求新增地址时）、`cancel-order`（仅用户要求取消时）。
+营养、积分、商城、抽奖、团餐等能力不属于当前主流程。`delivery-create-address` 与 `cancel-order` 仅在用户明确要求新增地址或取消订单时处理。
 
-## 3. 数据流（真实模式一轮挑战）
+## 3. 一轮预算挑战的数据流
 
-```
-用户输入(预算/方式/偏好)
-  │
-  ├─ 缺门店/地址 → query-nearby-stores / delivery-query-addresses → delivery-query-stores
-  │
-  ├─ 用户请求或确认领券 → auto-bind-coupons（失败不阻塞）
-  │
-  ├─ query-meals ──► adapt_query_meals() 菜单(元字符串)──► 统一菜单(分)
-  ├─ query-store-coupons ──► 券上下文(仅展示；能否用券以算价为准)
-  │
-  ├─ budget_engine.build_ladder(ctx)
-  │     ├─ 生成 ≤30 个候选购物车(去重、套餐优先排序)
-  │     ├─ 前 ≤12 个去重购物车 → calculate-price ──► adapt_quote() 整数分
-  │     │     └─ 校验 price == productPrice − discount + deliveryPrice + packingPrice（缺省按 0）
-  │     └─ 输出 B-5/B/B+5 阶梯 + 增减解释（三档共享报价）
-  │
-  ├─ 用户选定方案 → 展示门店/方式/餐品/优惠/餐具/金额 → 确认
-  │
-  ├─ 下单前重新 calculate-price（内容或金额变化则更新确认）
-  │
-  └─ create-order(takeWayCode 来自算价 takeWayList / addressId 外送)
-        └─ 核对 orderDetail → 支付交付（链接优先 / App 待付订单 / 本地二维码 make_qr.py）
-              └─ 用户自行完成支付 → query-order 可查进度
+```text
+用户输入预算、就餐方式和口味
+  → 确认到店 / 得来速 / 外送，再选真实门店或地址
+  → 用户请求或确认领券时 auto-bind-coupons
+  → query-meals + query-meal-detail + query-store-coupons
+  → 适配菜单，构建完整且可核价的候选购物车
+  → build_ladder(ctx, quote_fn=callback)
+      → 生成最多 30 个候选
+      → 最多 12 个去重购物车提交 calculate-price
+      → 校验并适配官方报价，输出 B-5 / B / B+5 与增减解释
+  → 用户选定方案，下单前重新 calculate-price
+  → 展示最终门店、方式、餐品、优惠、餐具、应付金额
+  → 用户确认后 create-order
+  → 核对 orderDetail，交付支付链接
+  → 用户完成支付；需要时 query-order 查询结果
 ```
 
-演示模式：同一引擎、同一契约，`quote_fn` 为空时用 `assets/sample_data.json` 的样例规则定价，全部方案标记 `demo_sample`，无任何真实写操作。演示页内嵌 JS 引擎与 Python 引擎输出经 `scripts/test_engine_parity.py` 验证一致。
+**客户端对接**：预算引擎不自己调用 MCP。调用方将真实菜单适配为统一格式，构建含券、套餐轮次、特制等必要字段的完整购物车，提交当前 `calculate-price`，再通过 `adapt_quote` 返回整数分报价。不能确认完整结构的候选不用于真实订单。
 
-**支付交付边界**：MCP 无支付工具（也不应有——资金操作必须由用户完成）。**默认方式 A（链接优先，2026-10-10 用户确认）**：下单后按固定模板交付纯文本 `payH5Url` + 操作指引（复制到手机，微信/浏览器打开即付，模板内置方式 B 的 App 待付路径兜底）；方式 C 本地二维码（`scripts/make_qr.py`，订单链接不出本机，不走第三方二维码服务）**仅在用户主动要求时**使用。H5 收银页手机端实际表现（是否可直接拉起微信/支付宝）待真实订单实测。
+如果客户端只能在对话中逐次调用工具，可以先用记录购物车并返回 `None` 的回调收集本轮候选，逐一官方核价，再通过本轮报价缓存重新运行引擎。两次运行必须保持同一输入与门店、方式、时段上下文；首轮没有成功报价，不是可用餐单。`scripts/real_smoke.py` 提供只读程序对接示例。
+
+**卡片交付**：`scripts/render_card.py` 从已核价的阶梯结果生成本地 HTML，可在浏览器中导出 PNG。仅使用成功核价的选定方案与本轮带时区的核价时间；不使用生成时间冒充核价时间，不读取账户信息。输入约定见 [数据约定](references/data_conventions.md)。
+
+**支付交付**：创建订单后交付 `payH5Url` 纯文本及手机打开指引，并提供 App 待付订单路径兜底。用户主动要求二维码时，可使用 `scripts/make_qr.py` 在本机生成，订单链接不发送给第三方二维码服务。支付在用户打开的官方收银流程中完成，技能不代替用户执行付款。
 
 ## 4. 报价与下单边界
 
-- **报价有效性**：与 storeCode/beCode/orderType/beType/时段/购物车内容/券绑定。任一变化即失效；预算变化仅可复用"完全相同购物车+上下文"的短期展示报价，下单前必须重新 `calculate-price`。
-- **下单原子性**：确认 → 复核算价 → create-order 一次。超时/结果不明确**不自动重试**：有 orderId 走 `query-order`；无 orderId 走 `order-list` 辅助核实；禁止猜测成功或重复创建（避免重复扣款风险）。
-- **支付边界**：技能只展示 `payH5Url`，支付动作永远由用户完成。
-- **写操作白名单**：领券（用户要求时）、下单（用户确认后）。调整预算、浏览方案、导出卡片均无写操作。
+- **报价有效性**：与 storeCode、beCode、orderType、beType、时段、购物车及券绑定。任一变化即重新核价；相同购物车的展示报价也须在下单前刷新。
+- **金额校验**：实测官方返回满足 `price = productPrice − discount + deliveryPrice + packingPrice`，到店缺省配送费与打包费按 0。字段不自洽时停止使用该报价，按当前 schema 核实费用归属，不能重复扣减优惠。
+- **下单确认**：最终核价后展示订单信息并确认。内容或金额变化时更新确认，不用先前同意替代对变化的确认。
+- **避免重复订单**：`create-order` 超时或结果不明确时不自动重试；有 orderId 查 `query-order`，没有则通过 `order-list` 辅助核实。
+- **状态变化**：领券会改变账户券状态，只在用户请求或确认后执行。调预算、浏览方案和导出卡片均不创建订单。
+- **支付**：订单支付链接只向当前用户交付，不进入日志、仓库或挑战卡；用户完成付款。
 
-## 5. 错误处理与状态
+## 5. 错误处理
 
-| 情形 | 表现 | 恢复 |
-|------|------|------|
-| MCP 未连接 | 运行 `scripts/check_mcp.py` 判定状态（not_configured/placeholder/configured/verified/invalid/network_error），输出安装与绑定引导；期间回落演示模式并明确标注 | 按引导申请 Token（open.mcd.cn）→ 配置连接器 → 启用/信任 → 重新 check |
-| 401 认证失败 | 提示 Token 无效/过期 | 重新申请并更新连接器配置 |
-| 429 限流 | 提示稍后重试，自动降低调用频率 | 等待后继续 |
-| 菜单为空/门店不可售 | 如实说明，不编造餐品 | 换门店/时段或稍后再试 |
-| 券失效 | 从候选定价中剔除并重算 | 提示用户券不可用 |
-| calculate-price 失败 | 该购物车标记 quote_failed，不展示为可行 | 用户重试或换方案 |
-| create-order 超时 | 不自动重试；按第 4 节核实 | 查订单确认后再决定 |
+| 情形 | 表现与恢复 |
+| --- | --- |
+| MCP 未连接 | 检查当前工具与本机配置，提供安装、Token 申请及连接指引；连接成功后再继续 |
+| 401 认证失败 | 提示 Token 无效或失效，更新本机配置后重试 |
+| 429 限流 | 降低调用频率，等待后继续 |
+| 菜单为空或门店不可售 | 如实说明，换门店、时段或稍后重试 |
+| 券不可用或领取失败 | 重新查询现有可用券并核价；不虚构减免 |
+| 算价失败 | 标记 `quote_failed`，不作为预算内方案 |
+| 全部报价失败 | 说明本轮没有可用官方报价，不计算虚构预算缺口 |
+| 创建订单结果不明确 | 先查订单核实，不自动重复创建 |
 
-## 6. 真实验证状态（如实声明）
+## 6. 真实验证记录
 
-- **已验证（真实 MCP 连接，2026-10-09 实测）**：本机已配置有效 MCP Token（WorkBuddy 本地 mcp.json / 环境变量），通过 `scripts/real_smoke.py` 直连完成只读端到端验证：
-  - `now-time-info` ✓；`query-nearby-stores`（肇庆市·端州三路，searchType=2，city 与 keyword **均必传**）✓ 选中麦当劳肇庆端州三路餐厅 storeCode=1420419；
-  - `query-meals` ✓ 返回 106 项，`adapt_query_meals` 适配为统一菜单（元字符串→分）；
-  - `calculate-price` ✓ 12 次官方算价 0 失败（整数分），25 元预算输出 [priced] 方案：鸡肉堡单品精选应付 ¥24；
-  - 实测发现两处与文档示例的差异，均已适配：① 到店场景返回**缺省 deliveryPrice/packingPrice 字段**（按 0 处理，打包费纳入恒等式）；② 返回含文档未列的 `packingPrice`（打包费）与 `enjoyed`/`enjoyable`（优惠明细，`realDiscount` 单位为**元**）。
-- **未验证（需用户操作授权）**：`auto-bind-coupons`（会改变账户券状态）、`create-order`（真实下单）及之后的支付流程。首次使用时按第 4 节边界执行，建议先用最小订单验证。
-- 字段或行为与本文不符时，**以实际返回为准**并回改 `references/mcp_tools.md` 与适配器。
+### 已记录的只读端到端实测
+
+源项目记录于 2026-10-09 使用 `scripts/real_smoke.py` 直连麦当劳 MCP：
+
+- `now-time-info` 与 `query-nearby-stores` 调用成功；肇庆市端州三路餐厅，storeCode=1420419。searchType=2 时 city 与 keyword 均必传。
+- `query-meals` 返回 106 项，菜单的元字符串成功适配为整数分。
+- `calculate-price` 完成 12 次官方算价、0 失败；当时 25 元预算返回已核价方案，鸡肉堡单品精选应付 24 元。该金额是历史验证记录，不能用作当前门店价格。
+- 适配了到店返回中可能缺省的 deliveryPrice、packingPrice，以及实测出现的 packingPrice、enjoyed、enjoyable 字段。优惠明细 realDiscount 单位为元。
+
+### 开发者补充确认的真实流程
+
+开发者在本次版本更新中明确确认：**`auto-bind-coupons`、`create-order` 及之后的支付流程已测试可行**。当前文档与技能流程据此更新。
+
+验证来源为开发者补充说明；本次发布的离线检查结果见 [GitHub 发布记录](https://github.com/ryb792/mcbudget/blob/main/docs/RELEASE_VALIDATION.md)。此前各版本的检查记录按当时情况保留，后续复测或字段变化可更新本节及 [工具参考](references/mcp_tools.md)。

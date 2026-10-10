@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""McBudget 连接检查（首次使用引导，只读、零依赖）。
+"""McBudget 真实 MCP 连接检查（首次使用引导，只读、零依赖）。
 
 检测本机麦当劳 MCP 凭据状态，为 WorkBuddy、Codex 等客户端给出安装/绑定引导：
   not_configured        未找到 mcd-mcp 配置 → 引导申请 Token + 配置连接器
@@ -14,7 +14,7 @@
   1. 环境变量 MCD_MCP_TOKEN（跨客户端首选）
   2. --config 指定的 MCP JSON，或兼容回退 ~/.workbuddy/mcp.json
      JSON 凭据字段为 mcpServers.mcd-mcp.headers.Authorization（Bearer xxx）。
-     Codex 使用 bearer_token_env_var=MCD_MCP_TOKEN，配置示例见 README.md；
+     Codex 使用 bearer_token_env_var=MCD_MCP_TOKEN，配置示例见 docs/GETTING_STARTED.md；
      本脚本不自动扫描 Codex TOML，也不判定客户端是否已经加载 MCP 工具。
 
 用法：
@@ -81,10 +81,10 @@ def load_local_config(config_path: str | None = None) -> dict:
 GUIDE_STEPS = [
     "① 申请 Token：手机号登录 https://open.mcd.cn → 右上角【控制台】→ 激活 → 同意协议 → 一键复制 MCP Token（此步即完成账户绑定）。",
     "② 本地凭据：优先设置环境变量 MCD_MCP_TOKEN，供跨客户端脚本读取；新设置后需重新启动相应终端或客户端。不要将 Token 发到对话或写入代码。",
-    "③ 配置客户端：服务地址 https://mcp.mcd.cn。WorkBuddy、Codex 等客户端的配置字段不同，请按 README.md 中相应示例操作；Codex 通过 bearer_token_env_var 引用 MCD_MCP_TOKEN。",
+    "③ 配置客户端：服务地址 https://mcp.mcd.cn。WorkBuddy、Codex 等客户端的配置字段不同，请按 docs/GETTING_STARTED.md 中相应示例操作；Codex 通过 bearer_token_env_var 引用 MCD_MCP_TOKEN。",
     "④ 启用客户端中的麦当劳 MCP 服务，按当前客户端提示完成信任/连接；回到对话确认工具可用。脚本 --probe 只验证凭据与服务响应，不代表客户端已加载工具。",
 ]
-GUIDE_AGENT_NOTE = "请在本机客户端设置或环境变量中配置 Token，不要向对话发送 Token。WorkBuddy JSON 仍可兼容回退；Codex 配置方法见 README.md。"
+GUIDE_AGENT_NOTE = "请在本机客户端设置或环境变量中配置 Token，不要向对话发送 Token。WorkBuddy JSON 仍可兼容回退；Codex 配置方法见 docs/GETTING_STARTED.md。连接未就绪时先完成配置，再继续真实选餐与核价。"
 
 PROBE_BODY = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                          "params": {"name": "now-time-info", "arguments": {}}}).encode("utf-8")
@@ -182,7 +182,7 @@ def classify(local: dict, do_probe: bool, config_path: str | None) -> dict:
         return out
     if not do_probe:
         out["status"] = "configured"
-        out["message"] = "本机已发现 Token（未验证有效性）。加 --probe 可直连验证；还需按 README.md 配置当前客户端，并确认对话中可发现麦当劳 MCP 工具。"
+        out["message"] = "本机已发现 Token（未验证有效性）。加 --probe 可直连验证；还需按 docs/GETTING_STARTED.md 配置当前客户端，并确认对话中可发现麦当劳 MCP 工具。"
         return out
     token = os.environ.get("MCD_MCP_TOKEN", "").strip()
     if not token:
@@ -201,7 +201,7 @@ def classify(local: dict, do_probe: bool, config_path: str | None) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="McBudget 麦当劳 MCP 连接检查")
     ap.add_argument("--probe", action="store_true", help="直连 mcp.mcd.cn 验证 Token（一次 now-time-info）")
-    ap.add_argument("--config", default=None, help="MCP JSON 路径（环境变量优先；默认兼容 ~/.workbuddy/mcp.json；Codex 示例见 README.md）")
+    ap.add_argument("--config", default=None, help="MCP JSON 路径（环境变量优先；默认兼容 ~/.workbuddy/mcp.json；Codex 示例见 docs/GETTING_STARTED.md）")
     args = ap.parse_args()
 
     local = load_local_config(args.config)

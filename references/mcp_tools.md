@@ -18,7 +18,7 @@
 | calculate-price | `productPrice` / `deliveryPrice` / `discount` / `price` / `productList[].subtotal` / `tablewarePrice` | **整数分** | `1600` = 16 元 |
 | create-order / query-order | `totalAmount` / `realTotalAmount` / `productPrice` / `deliveryPrice` / `totalDiscountAmount` | **元字符串** | `"22"` |
 
-规则：内部一律整数分；`budget_engine.to_cents(value, source)` 按 `source` 显式声明来源单位（`menu_yuan` / `quote_cents` / `order_yuan` / `user_yuan`），禁止按数值大小猜单位；`adapt_quote` 校验 `price == productPrice - discount + deliveryPrice`，不自洽即报错（防止字段含义误解导致重复扣减）。
+规则：内部一律整数分；`budget_engine.to_cents(value, source)` 按 `source` 显式声明来源单位（`menu_yuan` / `quote_cents` / `order_yuan` / `user_yuan`），禁止按数值大小猜单位；`adapt_quote` 校验 `price == productPrice - discount + deliveryPrice + packingPrice`（缺省费用按 0），不自洽即报错，不能重复扣减优惠。Skill 只使用当前真实工具返回；未连接时先配置，不用替代报价继续。
 
 ## McBudget 使用路径上的工具
 
@@ -46,7 +46,7 @@ V1 原则：**优先完整默认套餐**，不猜测套餐子项或特制选项�
 返回 `data[]`：`title`、`couponId`、`couponCode`、`tradeDateTime`（有效期区间）、`products[]`（适用 `productCode`/`productName`）。券能否使用由当前门店和算价结果校验，**不根据券标题推算折扣**。
 
 ### available-coupons / auto-bind-coupons / query-my-coupons（麦麦省领券）
-三者均无入参。`auto-bind-coupons` 自动领取全部可领券；返回为 markdown 文本，其中含 `couponId`/`couponCode`，需要解析文本提取。领券后必须重新 `query-store-coupons` + `calculate-price`。
+三者均无入参。`auto-bind-coupons` 自动领取全部可领券，改变账户券状态，只在用户请求或确认后调用。返回可能为 markdown 文本，按当前返回提取 `couponId`/`couponCode`。领券后必须重新 `query-store-coupons` + `calculate-price`。开发者已补充确认领券、创建订单与后续支付流程测试可行，验证来源见 `../MCP_INTEGRATION.md` 第 6 节。
 
 ### calculate-price（算价）
 入参：`storeCode`、`beCode`、`orderType`、`beType`、`reservationDate`（预约）、`gmServiceCode`（团餐）、`withOrder`（随单购，来自菜单返回）、`needTableware`（餐具费）、`items[]`。

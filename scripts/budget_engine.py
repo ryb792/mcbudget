@@ -2,10 +2,9 @@
 # -*- coding: utf-8 -*-
 """McBudget 确定性预算引擎。
 
-同一份算法与数据约定同时服务两种模式，避免"演示与真实计算含义不同"：
-- 演示模式：quote_fn 为空，使用 assets/sample_data.json 的样例优惠规则估算，所有方案状态为 demo_sample。
-- 真实模式：调用方（WorkBuddy、Codex 等支持 MCP 的客户端）把 query-meals/calculate-price 的返回适配成本引擎的
-  输入契约，并通过 quote_fn 提交真实报价（≤12 个去重购物车），方案状态为 priced / quote_failed / estimated。
+调用方（WorkBuddy、Codex 等支持 MCP 的客户端）把当前 query-meals/calculate-price
+返回适配成本引擎的输入契约，并通过 quote_fn 提交官方报价（≤12 个去重购物车）。
+没有报价回调时拒绝计算；菜单估算只安排核价顺序，不作为可行方案。
 
 硬约束（与 SKILL.md 一致）：
 - 内部金额一律整数"分"；菜单与订单的"元字符串"、算价的"整数分"由适配器按官方文档显式转换。
@@ -17,13 +16,10 @@
 from __future__ import annotations
 
 import argparse
-import json
-import sys
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import product as iter_product
 from typing import Any, Callable, Optional
 
-DEMO_STATUS = "demo_sample"
 PRICED_STATUS = "priced"
 ESTIMATED_STATUS = "estimated"
 QUOTE_FAILED_STATUS = "quote_failed"
@@ -288,56 +284,6 @@ def generate_candidates(
 
 
 # ---------------------------------------------------------------------------
-# 定价
-# ---------------------------------------------------------------------------
-
-def demo_price_cart(cart: list[dict], sample: dict) -> dict:
-    """演示模式定价：按样例优惠规则取最优单券。返回与 adapt_quote 相同结构。"""
-    product = sum(i["price_cents"] * i["qty"] for i in cart)
-    delivery_rule = sample.get("delivery", {})
-    fee = delivery_rule.get("fee_cents", 0)
-    threshold = delivery_rule.get("free_threshold_cents", 0)
-    delivery = 0 if threshold and product >= threshold else fee
-
-    best = None
-    for cpn in sample.get("coupons", []):
-        d = _demo_coupon_discount(cart, product, cpn)
-        if d > 0 and (best is None or d > best[1]):
-            best = (cpn, d)
-    discount = best[1] if best else 0
-    return {
-        "product_cents": product,
-        "discount_cents": discount,
-        "delivery_cents": delivery,
-        "payable_cents": product - discount + delivery,
-        "coupon": best[0]["title"] if best else None,
-    }
-
-
-def _demo_coupon_discount(cart: list[dict], product_total: int, cpn: dict) -> int:
-    t = cpn.get("type")
-    if t == "item_discount":
-        kw = cpn.get("target_keyword", "")
-        hit = [i for i in cart if kw and kw in i["name"] and i.get("category") == cpn.get("target_category", i.get("category"))]
-        if not hit:
-            return 0
-        # 样例规则：无论命中几件只减一次（不重复扣减）
-        return cpn["discount_cents"]
-    if t == "order_discount":
-        return cpn["discount_cents"] if product_total >= cpn.get("threshold_cents", 0) else 0
-    if t == "category_discount":
-        sub = sum(i["price_cents"] * i["qty"] for i in cart if i.get("category") == cpn.get("category"))
-        return cpn["discount_cents"] if sub >= cpn.get("threshold_cents", 0) else 0
-    return 0
-
-
-def demo_price_fn_factory(sample: dict) -> Callable[[list[dict]], Optional[dict]]:
-    def quote_fn(cart: list[dict]) -> Optional[dict]:
-        return demo_price_cart(cart, sample)
-    return quote_fn
-
-
-# ---------------------------------------------------------------------------
 # 排序与代表方案
 # ---------------------------------------------------------------------------
 
@@ -434,7 +380,7 @@ def explain_delta(low_plan: dict, high_plan: dict) -> list[str]:
     else:
         basis = "，".join(why) if why else "组成未变"
         out.append(f"实付由 {format_yuan(qa['payable_cents'])} 元变为 {format_yuan(qb['payable_cents'])} 元（{'多花' if d_pay > 0 else '少花'} {format_yuan(abs(d_pay))} 元；来源：{basis}）。")
-    out.append("以上差额来自实际餐品与官方/样例报价，不是预算档位差额。")
+    out.append("以上差额来自实际餐品与官方报价，不是预算档位差额。")
     return out
 
 
@@ -452,14 +398,19 @@ def build_ladder(
 ) -> dict:
     """构建预算阶梯。
 
-    ctx 契约（演示与真实共享）：
+    ctx 契约：
       budget_cents: int            应付总额上限（含配送费）
       order_type: "pickup"|"delivery"
       menu: [item]                 统一菜单（price_cents）
-      sample: dict|None            演示样例数据（demo 模式必填）
       prefs: [str]; excluded: [str]; must: [str]
-    真实模式：quote_fn 提交官方算价；返回 None 视为核价失败。
+    quote_fn 必须提交当前上下文的官方算价；返回 None 视为核价失败。
+    对话两阶段集成可以先用返回 None 的回调收集购物车，再用官方报价缓存计算。
+    "sample" 非空或 "mode" 指定为非 real 时拒绝执行。
     """
+    if not callable(quote_fn):
+        raise ValueError("必须提供调用麦当劳 calculate-price 的 quote_fn；请先连接 MCP，不能以菜单估算替代官方核价")
+    if ctx.get("sample") is not None or ctx.get("mode", "real") != "real":
+        raise ValueError("真实预算引擎只接受当前 MCP 菜单与官方报价上下文")
     budget = int(ctx["budget_cents"])
     order_type = ctx.get("order_type", "pickup")
     if order_type not in ("pickup", "dt", "delivery"):
@@ -468,57 +419,80 @@ def build_ladder(
     excluded = list(ctx.get("excluded", []))
     must = list(ctx.get("must", []))
     menu = ctx["menu"]
-    is_demo = quote_fn is None
-
-    if excluded and order_type == "delivery":
-        pass  # 外送同样适用排除项
-
     candidates = generate_candidates(menu, prefs, excluded, must)
 
-    # 候选定价（演示：规则定价；真实：估算→提交≤12个去重购物车官方报价）
+    # 菜单估算只安排核价顺序，再提交 ≤12 个去重购物车官方报价。
     quotes: dict[str, dict] = {}
     statuses: dict[str, str] = {}
     quote_calls = 0
 
-    def demo_quote(cart):
-        q = demo_price_cart(cart, ctx["sample"])
-        q["delivery_cents"] = 0 if order_type in ("pickup", "dt") else q["delivery_cents"]
-        q["payable_cents"] = q["product_cents"] - q["discount_cents"] + q["delivery_cents"]
-        return q
+    for cart in candidates:
+        sig = cart_signature(cart)
+        quotes[sig] = _estimate_for_real(cart, order_type, ctx)
+        statuses[sig] = ESTIMATED_STATUS
+    ordered = sorted(
+        candidates,
+        key=lambda c: (
+            -sum(pref_hits(i, prefs) for i in c),
+            0 if has_combo_item(c) else 1,
+            quotes[cart_signature(c)]["payable_cents"],
+            cart_signature(c),
+        ),
+    )
+    for cart in ordered[:MAX_QUOTE_CALLS]:
+        sig = cart_signature(cart)
+        quote_calls += 1
+        try:
+            res = _validated_quote(quote_fn(cart))
+        except Exception:
+            res = None
+        if res is None:
+            statuses[sig] = QUOTE_FAILED_STATUS
+        else:
+            quotes[sig] = res
+            statuses[sig] = PRICED_STATUS
 
-    if is_demo:
-        for cart in candidates:
-            sig = cart_signature(cart)
-            quotes[sig] = demo_quote(cart)
-            statuses[sig] = DEMO_STATUS
-    else:
-        for cart in candidates:
-            sig = cart_signature(cart)
-            est = _estimate_for_real(cart, order_type, ctx)
-            quotes[sig] = est
-            statuses[sig] = ESTIMATED_STATUS
-        ordered = sorted(
-            candidates,
-            key=lambda c: (
-                -sum(pref_hits(i, prefs) for i in c),
-                0 if has_combo_item(c) else 1,
-                quotes[cart_signature(c)]["payable_cents"],
-                cart_signature(c),
-            ),
-        )
-        for cart in ordered[:MAX_QUOTE_CALLS]:
-            sig = cart_signature(cart)
-            quote_calls += 1
-            try:
-                res = quote_fn(cart) if quote_fn else None
-            except Exception:
-                res = None
-            if res is None:
-                statuses[sig] = QUOTE_FAILED_STATUS
-            else:
-                quotes[sig] = {**res}
-                statuses[sig] = PRICED_STATUS
+    tiers, deltas = _select_tiers(budget, candidates, quotes, statuses, prefs, must)
+    return {
+        "mode": "real",
+        "order_type": order_type,
+        "budget_cents": budget,
+        "tiers": tiers,
+        "deltas": deltas,
+        "meta": {
+            "candidate_count": len(candidates),
+            "quote_calls": quote_calls,
+            "max_candidates": MAX_CANDIDATES,
+            "max_quote_calls": MAX_QUOTE_CALLS,
+            "deterministic": True,
+            "claim": "本轮候选中的推荐，不构成全局最便宜或穷尽全部组合的承诺",
+        },
+    }
 
+
+def _validated_quote(quote: Optional[dict]) -> Optional[dict]:
+    """验证调用方适配后的官方报价；未成功核价或金额异常时不进入预算判断。"""
+    if quote is None:
+        return None
+    if not isinstance(quote, dict) or quote.get("estimated"):
+        return None
+    if "status" in quote and quote["status"] != PRICED_STATUS:
+        return None
+    if quote.get("source") in ("demo_sample", ESTIMATED_STATUS, QUOTE_FAILED_STATUS):
+        return None
+    fields = ("product_cents", "discount_cents", "delivery_cents", "payable_cents")
+    if any(type(quote.get(k)) is not int or quote[k] < 0 for k in fields):
+        return None
+    if quote["payable_cents"] != quote["product_cents"] - quote["discount_cents"] + quote["delivery_cents"]:
+        return None
+    return dict(quote)
+
+
+def _select_tiers(
+    budget: int, candidates: list[list[dict]], quotes: dict[str, dict],
+    statuses: dict[str, str], prefs: list[list[str]], must: list[str],
+) -> tuple[list[dict], list[dict]]:
+    """从已完成核价的候选选择三档代表方案，保持排序与解释逻辑统一。"""
     def tier_label(c: int, b: int) -> str:
         if c == b:
             return "B"
@@ -528,8 +502,7 @@ def build_ladder(
     prev_plan = None
     prev_label = None
     # 菜单估算仅用于安排核价；真实模式的预算判断必须来自成功的官方报价。
-    usable_status = DEMO_STATUS if is_demo else PRICED_STATUS
-    usable_candidates = [c for c in candidates if statuses[cart_signature(c)] == usable_status]
+    usable_candidates = [c for c in candidates if statuses[cart_signature(c)] == PRICED_STATUS]
     for tb in _tier_budgets(budget):
         feasible = [c for c in usable_candidates if quotes[cart_signature(c)]["payable_cents"] <= tb]
         entry: dict[str, Any] = {"budget_cents": tb, "label": tier_label(tb, budget)}
@@ -560,9 +533,8 @@ def build_ladder(
                     }
                 )
             else:
-                entry.update({"status": UNSOLVABLE_STATUS if is_demo else QUOTE_FAILED_STATUS, "min_candidate": None, "gap_cents": None})
-                if not is_demo:
-                    entry["note"] = "本轮未获得可用官方报价，不能判断预算内方案"
+                entry.update({"status": QUOTE_FAILED_STATUS, "min_candidate": None, "gap_cents": None})
+                entry["note"] = "本轮未获得可用官方报价，不能判断预算内方案"
         tiers.append(entry)
 
     deltas = []
@@ -576,21 +548,7 @@ def build_ladder(
             }
         )
 
-    return {
-        "mode": "demo" if is_demo else "real",
-        "order_type": order_type,
-        "budget_cents": budget,
-        "tiers": tiers,
-        "deltas": deltas,
-        "meta": {
-            "candidate_count": len(candidates),
-            "quote_calls": quote_calls,
-            "max_candidates": MAX_CANDIDATES,
-            "max_quote_calls": MAX_QUOTE_CALLS,
-            "deterministic": True,
-            "claim": "本轮候选中的推荐，不构成全局最便宜或穷尽全部组合的承诺",
-        },
-    }
+    return tiers, deltas
 
 
 def _estimate_for_real(cart: list[dict], order_type: str, ctx: dict) -> dict:
@@ -613,45 +571,14 @@ def _estimate_for_real(cart: list[dict], order_type: str, ctx: dict) -> dict:
 # CLI
 # ---------------------------------------------------------------------------
 
-def _read_ctx(args) -> dict:
-    if args.input:
-        with open(args.input, encoding="utf-8") as f:
-            return json.load(f)
-    ctx = {
-        "budget_cents": to_cents(str(args.budget), "user_yuan"),
-        "order_type": args.order_type,
-        "menu": [],
-        "sample": None,
-        "prefs": args.pref or [],
-        "excluded": args.exclude or [],
-        "must": args.must or [],
-    }
-    if args.sample_data:
-        with open(args.sample_data, encoding="utf-8") as f:
-            sample = json.load(f)
-        ctx["sample"] = sample
-        ctx["menu"] = sample["menu"]
-    return ctx
-
-
 def main(argv: Optional[list[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="McBudget 确定性预算引擎")
-    ap.add_argument("--input", help="上下文 JSON 文件（含 budget_cents/order_type/menu 等）")
-    ap.add_argument("--budget", type=str, default="25", help="预算（元）")
-    ap.add_argument("--order-type", choices=["pickup", "dt", "delivery"], default="pickup",
-                    help="就餐方式：pickup 到店取餐 / dt 得来速 / delivery 麦乐送（方式决定菜单上下文，必须先于选餐确认）")
-    ap.add_argument("--sample-data", default=None, help="演示样例数据 JSON（assets/sample_data.json）")
-    ap.add_argument("--pref", action="append", help="口味偏好关键词，可多次")
-    ap.add_argument("--exclude", action="append", help="不想吃的关键词，可多次")
-    ap.add_argument("--must", action="append", help="必选餐品关键词，可多次")
-    ap.add_argument("--indent", type=int, default=2)
-    args = ap.parse_args(argv)
-
-    ctx = _read_ctx(args)
-    result = build_ladder(ctx)
-    json.dump(result, sys.stdout, ensure_ascii=False, indent=args.indent)
-    sys.stdout.write("\n")
-    return 0
+    ap = argparse.ArgumentParser(
+        description="McBudget 真实预算引擎；由 MCP 客户端通过 Python API 调用",
+        epilog="调用 build_ladder(ctx, quote_fn=...) 并提供当前 calculate-price 官方报价。只读端到端检查可运行 scripts/real_smoke.py。",
+    )
+    ap.parse_args(argv)
+    ap.error("不能从命令行上下文自行核价；请由已连接麦当劳 MCP 的客户端调用 build_ladder(ctx, quote_fn=...)")
+    return 2
 
 
 if __name__ == "__main__":
