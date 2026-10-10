@@ -1,0 +1,47 @@
+{
+  "_meta": {
+    "disclaimer": "本文件为演示样例数据：餐品名称参考麦当劳常见品类，但编码、价格、优惠规则均为虚构样例，非任何门店的真实菜单或真实报价。",
+    "unit": "cents",
+    "currency": "CNY",
+    "mode": "demo"
+  },
+  "store": {
+    "storeName": "演示样例餐厅（McBudget Demo）",
+    "storeCode": "DEMO001",
+    "beCode": "DEMOBE"
+  },
+  "delivery": {
+    "fee_cents": 900,
+    "free_threshold_cents": 3900,
+    "note": "演示规则：商品金额满39元免配送费，否则收9元配送费。"
+  },
+  "menu": [
+    { "code": "1001", "name": "双层吉士汉堡", "category": "main", "price_cents": 1350, "tags": ["牛肉"] },
+    { "code": "1002", "name": "麦辣鸡腿堡", "category": "main", "price_cents": 1650, "tags": ["鸡肉", "辣"] },
+    { "code": "1003", "name": "板烧鸡腿堡", "category": "main", "price_cents": 2100, "tags": ["鸡肉"] },
+    { "code": "1004", "name": "巨无霸", "category": "main", "price_cents": 2450, "tags": ["牛肉"] },
+    { "code": "1005", "name": "麦香鱼堡", "category": "main", "price_cents": 1200, "tags": ["鱼"] },
+    { "code": "1006", "name": "不素之霸双层牛堡", "category": "main", "price_cents": 1750, "tags": ["牛肉"] },
+    { "code": "2001", "name": "麦辣鸡腿堡套餐", "category": "combo", "price_cents": 2650, "tags": ["鸡肉", "辣"], "combo_items": [ { "name": "麦辣鸡腿堡" }, { "name": "中薯条" }, { "name": "中可乐" } ] },
+    { "code": "2002", "name": "板烧鸡腿堡套餐", "category": "combo", "price_cents": 3150, "tags": ["鸡肉"], "combo_items": [ { "name": "板烧鸡腿堡" }, { "name": "中薯条" }, { "name": "中可乐" } ] },
+    { "code": "2003", "name": "巨无霸中套餐", "category": "combo", "price_cents": 3450, "tags": ["牛肉"], "combo_items": [ { "name": "巨无霸" }, { "name": "中薯条" }, { "name": "中可乐" } ] },
+    { "code": "3001", "name": "麦乐鸡5块", "category": "snack", "price_cents": 1100, "tags": ["鸡肉"] },
+    { "code": "3002", "name": "中薯条", "category": "snack", "price_cents": 1150, "tags": [] },
+    { "code": "3003", "name": "香芋派", "category": "snack", "price_cents": 800, "tags": [] },
+    { "code": "3004", "name": "菠萝派", "category": "snack", "price_cents": 800, "tags": [] },
+    { "code": "4001", "name": "可口可乐(中)", "category": "drink", "price_cents": 950, "tags": [] },
+    { "code": "4002", "name": "零度可口可乐(中)", "category": "drink", "price_cents": 950, "tags": [] },
+    { "code": "4003", "name": "拿铁咖啡(中)", "category": "drink", "price_cents": 2100, "tags": ["咖啡"] },
+    { "code": "4004", "name": "冰鲜柠檬水(中)", "category": "drink", "price_cents": 1050, "tags": [] }
+  ],
+  "coupons": [
+    { "id": "K1", "title": "麦辣鸡腿堡立减3元", "type": "item_discount", "target_keyword": "麦辣鸡腿堡", "target_category": "main", "discount_cents": 300, "threshold_cents": 0 },
+    { "id": "K2", "title": "满25元减4元", "type": "order_discount", "threshold_cents": 2500, "discount_cents": 400 },
+    { "id": "K3", "title": "小食满10元减2元", "type": "category_discount", "category": "snack", "threshold_cents": 1000, "discount_cents": 200 }
+  ],
+  "_rules": [
+    "演示模式一次购物车最多使用一张优惠（取减免最大的一张），与真实模式『能否用券以官方算价为准』的约束保持一致性测试口径。",
+    "item_discount 仅对购物车中匹配 target_keyword 且 category 为 target_category 的商品（按数量）立减；order_discount 对商品总额满 threshold 减固定金额；category_discount 对该类目商品合计满 threshold 减固定金额。",
+    "优惠不叠加：每张券只计算一次，多个购物车项命中 item_discount 时只减一次（简化样例规则，测试用）。"
+  ]
+}

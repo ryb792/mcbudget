@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>麦麦预算挑战 McBudget · 演示</title>
+<!--
+  McBudget 演示页（自包含，双击即可打开，无外网请求、无 fetch、无服务器）。
+  数据与引擎由 scripts/build_demo.py 从 assets/sample_data.json 与 scripts/engine.js 内联生成。
+  本页所有价格均为演示样例，永久标记"演示样例价格"；不发起任何真实领券、下单或支付。
+-->
+<style>
+  :root {
+    --red: #DA291C; --red-dark: #B7221A; --yellow: #FFC72C; --yellow-soft: #FFF3D1;
+    --ink: #2B2320; --ink-2: #6B5E57; --paper: #FFF8EE; --card: #FFFFFF;
+    --line: #EADFCB; --ok: #1F7A3D; --warn: #B25E00; --bad: #B7221A;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    background: var(--paper); color: var(--ink); line-height: 1.55;
+    padding: 16px 12px 48px;
+  }
+  .wrap { max-width: 680px; margin: 0 auto; }
+  header.hero {
+    background: var(--red); color: #fff; border-radius: var(--radius);
+    padding: 20px 20px 16px; position: relative; overflow: hidden;
+  }
+  header.hero::after {
+    content: ""; position: absolute; right: -30px; top: -30px; width: 130px; height: 130px;
+    background: var(--yellow); border-radius: 50%; opacity: .92;
+  }
+  header.hero::before {
+    content: ""; position: absolute; right: 6px; top: 6px; width: 88px; height: 88px;
+    background: var(--red-dark); border-radius: 50%;
+  }
+  .hero h1 { font-size: 22px; letter-spacing: .5px; position: relative; z-index: 1; }
+  .hero p { font-size: 13px; opacity: .95; margin-top: 4px; position: relative; z-index: 1; }
+  .demo-badge {
+    display: inline-block; margin-top: 10px; background: var(--yellow); color: #6b4b00;
+    font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; position: relative; z-index: 1;
+  }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-top: 14px; }
+  .panel h2 { font-size: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .panel h2 .dot { width: 8px; height: 8px; background: var(--red); border-radius: 2px; display: inline-block; }
+  label.small { font-size: 12px; color: var(--ink-2); display: block; margin-bottom: 4px; }
+  .budget-row { display: flex; gap: 10px; align-items: center; }
+  .budget-row input[type=range] { flex: 1; accent-color: var(--red); height: 28px; }
+  .budget-yuan { display: flex; align-items: baseline; gap: 2px; min-width: 96px; }
+  .budget-yuan .rmb { font-size: 15px; color: var(--red); font-weight: 700; }
+  .budget-yuan input[type=number] {
+    width: 72px; font-size: 24px; font-weight: 800; color: var(--red);
+    border: none; border-bottom: 2px solid var(--red); background: transparent; text-align: center;
+  }
+  .seg { display: inline-flex; background: var(--yellow-soft); border-radius: 999px; padding: 3px; gap: 2px; }
+  .seg button {
+    border: none; background: transparent; padding: 6px 16px; border-radius: 999px;
+    font-size: 13px; color: var(--ink-2); cursor: pointer; font-weight: 600;
+  }
+  .seg button.active { background: var(--red); color: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .chip {
+    border: 1px solid var(--line); background: #fff; border-radius: 999px;
+    padding: 5px 14px; font-size: 13px; cursor: pointer; color: var(--ink-2); user-select: none;
+  }
+  .chip.on { background: var(--yellow); border-color: var(--yellow); color: #5a4200; font-weight: 700; }
+  .chip.on.no { background: #FDE3E0; border-color: #F2B8B3; color: var(--bad); }
+  .kv-note { font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+  .tier { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); margin-top: 12px; overflow: hidden; }
+  .tier-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; background: var(--yellow-soft); cursor: pointer; border: none; width: 100%; text-align: left;
+  }
+  .tier-head .label { font-weight: 800; font-size: 15px; color: var(--red); }
+  .tier-head .budget { font-size: 12px; color: var(--ink-2); }
+  .tier-head .pay { font-size: 18px; font-weight: 800; }
+  .tier-head .pay .rmb { font-size: 12px; }
+  .tier-body { padding: 12px 16px 16px; display: none; }
+  .tier.open .tier-body { display: block; }
+  .status-badge {
+    display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 700;
+    background: var(--yellow); color: #6b4b00; margin-left: 8px; vertical-align: 2px;
+  }
+  .status-badge.carry { background: #E8F0FB; color: #2B5EA7; }
+  .status-badge.unsolvable { background: #FDE3E0; color: var(--bad); }
+  .food { display: flex; justify-content: space-between; align-items: flex-start; padding: 7px 0; border-bottom: 1px dashed var(--line); }
+  .food .name { font-size: 14px; font-weight: 600; }
+  .food .sub { font-size: 12px; color: var(--ink-2); margin-top: 2px; }
+  .food .price { font-size: 13px; color: var(--ink-2); white-space: nowrap; margin-left: 12px; }
+  .amounts { margin-top: 10px; font-size: 13px; }
+  .amounts .row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .amounts .row.total { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px; font-weight: 800; font-size: 15px; }
+  .amounts .row .neg { color: var(--ok); }
+  .amounts .row .left { color: var(--ink-2); }
+  .delta { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-top: 12px; font-size: 13px; }
+  .delta .tag { font-size: 12px; color: var(--red); font-weight: 700; margin-bottom: 4px; }
+  .delta p { color: var(--ink-2); margin-top: 3px; }
+  .unsolvable-box { font-size: 13px; color: var(--ink-2); }
+  .unsolvable-box b { color: var(--bad); }
+  .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .btn {
+    flex: 1; min-width: 140px; border: none; border-radius: 12px; padding: 13px 18px;
+    font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  .btn.primary { background: var(--red); color: #fff; }
+  .btn.primary:active { background: var(--red-dark); }
+  .btn.ghost { background: #fff; color: var(--red); border: 1.5px solid var(--red); }
+  .meta-line { font-size: 11px; color: var(--ink-2); margin-top: 14px; }
+  footer { font-size: 11px; color: var(--ink-2); margin-top: 18px; line-height: 1.7; }
+  /* 挑战卡预览 */
+  .modal-mask { position: fixed; inset: 0; background: rgba(30,20,10,.55); display: none; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
+  .modal-mask.show { display: flex; }
+  .modal { background: #fff; border-radius: 16px; padding: 14px; max-width: 400px; width: 100%; max-height: 92vh; overflow: auto; }
+  .modal img { width: 100%; border-radius: 10px; display: block; }
+  .modal .modal-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .modal .modal-actions .btn { flex: 1; padding: 11px; font-size: 14px; }
+  @media (max-width: 430px) {
+    body { padding: 10px 8px 40px; }
+    .hero h1 { font-size: 19px; }
+    .budget-yuan input[type=number] { font-size: 20px; width: 62px; }
+    .tier-head .pay { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <h1>麦麦预算挑战 · McBudget</h1>
+    <p>给定预算，看看今天怎么吃。三档方案、增减解释、分享挑战卡。</p>
+    <span class="demo-badge">演示样例价格 · 非真实报价 · 非官方产品</span>
+  </header>
+
+  <section class="panel">
+    <h2><span class="dot"></span>我的挑战</h2>
+    <label class="small">预算（应付总额上限，元）</label>
+    <div class="budget-row">
+      <div class="budget-yuan"><span class="rmb">¥</span><input id="budgetNum" type="number" min="1" max="99" step="1" value="25"></div>
+      <input id="budgetRange" type="range" min="5" max="60" step="1" value="25" aria-label="预算滑块">
+    </div>
+    <label class="small" style="margin-top:12px">就餐方式（先定方式，再选餐——不同方式菜单可能不同）</label>
+    <div class="seg" role="tablist">
+      <button id="modePickup" class="active" type="button">到店取餐</button>
+      <button id="modeDt" type="button">得来速</button>
+      <button id="modeDelivery" type="button">麦乐送（含配送费）</button>
+    </div>
+    <label class="small" style="margin-top:12px">想吃什么（可多选）</label>
+    <div class="chips" id="prefChips"></div>
+    <label class="small" style="margin-top:12px">不想吃（可多选）</label>
+    <div class="chips" id="noChips"></div>
+    <p class="kv-note" id="deliveryNote" style="display:none">演示规则：外送费 9 元，商品满 39 元免配送费；预算需覆盖餐品 + 配送费。</p>
+  </section>
+
+  <section id="tiers"></section>
+  <section id="deltas"></section>
+
+  <div class="actions">
+    <button class="btn primary" id="btnCard" type="button">生成挑战卡（PNG）</button>
+    <button class="btn ghost" id="btnReset" type="button">恢复默认挑战</button>
+  </div>
+  <p class="meta-line" id="metaLine"></p>
+  <p class="meta-line">推荐策略：先领券再选餐 · 优先推荐性价比更高的套餐（套餐不可行时回落最优单点组合）· 应付与优惠以官方/样例算价为准。</p>
+
+  <footer>
+    本页为 McBudget 技能的演示模式：所有餐品、价格与优惠规则均为固定样例（见页面源码内嵌数据），仅用于体验
+    预算阶梯、增减解释与挑战卡导出，不发起任何真实领券、下单或支付。真实模式需在 WorkBuddy 中连接麦当劳
+    MCP，由对话流程完成门店、菜单、算价、确认与下单，最终金额以官方算价为准。演示卡永久标记"演示样例价格"。
+    麦当劳及相关标识为麦当劳公司商标，本演示与其无关联。
+  </footer>
+</div>
+
+<div class="modal-mask" id="cardModal">
+  <div class="modal">
+    <img id="cardImg" alt="挑战卡预览">
+    <div class="modal-actions">
+      <button class="btn primary" id="btnDownload" type="button">保存 PNG</button>
+      <button class="btn ghost" id="btnClose" type="button">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/*__ENGINE_JS__*/
+</script>
+<script>
+var SAMPLE_DATA = /*__SAMPLE_DATA__*/null;
+</script>
+<script>
+(function () {
+  "use strict";
+  var E = window.McBudgetEngine;
+
+  var PREF_OPTIONS = ["鸡肉", "牛肉", "鱼", "不辣", "套餐"];
+  var NO_OPTIONS = ["咖啡", "辣", "鱼"];
+  var state = {
+    budget: 2500,
+    orderType: "pickup",
+    prefs: [],
+    excluded: [],
+    result: null,
+    selectedTier: 1
+  };
+
+  function yuan(cents) { return E.yuan(cents); }
+
+  function buildChips(containerId, options, isNo) {
+    var box = document.getElementById(containerId);
+    box.innerHTML = "";
+    options.forEach(function (word) {
+      var chip = document.createElement("span");
+      chip.className = "chip" + (isNo ? " no" : "");
+      chip.textContent = word;
+      chip.setAttribute("role", "button");
+      chip.tabIndex = 0;
+      function toggle() {
+        var list = isNo ? state.excluded : state.prefs;
+        var idx = list.indexOf(word);
+        if (idx >= 0) list.splice(idx, 1); else list.push(word);
+        chip.classList.toggle("on");
+        recalc();
+      }
+      chip.addEventListener("click", toggle);
+      chip.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+      box.appendChild(chip);
+    });
+  }
+
+  function statusBadge(tier) {
+    if (tier.status === "unsolvable") return '<span class="status-badge unsolvable">本档无可行方案</span>';
+    if (tier.plan && tier.plan.carry_over_from) return '<span class="status-badge carry">沿用 ' + tier.plan.carry_over_from + ' 档方案</span>';
+    return '<span class="status-badge">演示样例价格</span>';
+  }
+
+  function foodRows(cart) {
+    return cart.map(function (i) {
+      var sub = "";
+      if (i.combo_items && i.combo_items.length) {
+        sub = "套餐含：" + i.combo_items.map(function (s) { return s.name; }).join(" + ");
+      }
+      return '<div class="food"><div><div class="name">' + esc(i.name) + ' × ' + i.qty + '</div>' +
+        (sub ? '<div class="sub">' + esc(sub) + '</div>' : '') +
+        '</div><div class="price">¥' + yuan(i.price_cents * i.qty) + '</div></div>';
+    }).join("");
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function renderTiers() {
+    var box = document.getElementById("tiers");
+    box.innerHTML = "";
+    state.result.tiers.forEach(function (t, idx) {
+      var div = document.createElement("div");
+      div.className = "tier" + (idx === state.selectedTier ? " open" : "");
+      var head, body;
+      if (t.plan) {
+        var q = t.plan.quote;
+        var left = t.budget_cents - q.payable_cents;
+        head = '<button class="tier-head" type="button" data-idx="' + idx + '">' +
+          '<span><span class="label">' + esc(t.label) + '</span><span class="budget"> 预算 ¥' + yuan(t.budget_cents) + '</span>' + statusBadge(t) + '</span>' +
+          '<span class="pay"><span class="rmb">¥</span>' + yuan(q.payable_cents) + '</span></button>';
+        body = '<div class="tier-body">' + foodRows(t.plan.cart) +
+          '<div class="amounts">' +
+          '<div class="row"><span>商品金额</span><span>¥' + yuan(q.product_cents) + '</span></div>' +
+          (q.discount_cents ? '<div class="row"><span>优惠' + (q.coupon ? '（' + esc(q.coupon) + '）' : '') + '</span><span class="neg">-¥' + yuan(q.discount_cents) + '</span></div>' : '') +
+          '<div class="row"><span>配送费</span><span>' + (q.delivery_cents ? '¥' + yuan(q.delivery_cents) : '¥0（到店）') + '</span></div>' +
+          '<div class="row total"><span>应付金额</span><span>¥' + yuan(q.payable_cents) + '</span></div>' +
+          '<div class="row"><span class="left">剩余预算</span><span class="left">¥' + yuan(left) + '</span></div>' +
+          '</div></div>';
+      } else {
+        var mc = t.min_candidate;
+        var gap = t.gap_cents;
+        head = '<button class="tier-head" type="button" data-idx="' + idx + '">' +
+          '<span><span class="label">' + esc(t.label) + '</span><span class="budget"> 预算 ¥' + yuan(t.budget_cents) + '</span>' + statusBadge(t) + '</span>' +
+          '<span class="pay" style="color:var(--bad)">差 ¥' + yuan(gap || 0) + '</span></button>';
+        body = '<div class="tier-body"><div class="unsolvable-box">' +
+          (mc
+            ? '本预算内没有可行方案。已检候选中最低为 <b>¥' + yuan(mc.quote.payable_cents) + '</b>（' +
+              esc(mc.cart.map(function (i) { return i.name; }).join(" + ")) + '），还差 <b>¥' + yuan(gap) + '</b>。不会虚构低价套餐。'
+            : '本预算内没有可行方案，且当前样例中没有可检候选。') +
+          '</div></div>';
+      }
+      div.innerHTML = head + body;
+      div.querySelector(".tier-head").addEventListener("click", function () {
+        state.selectedTier = idx;
+        renderTiers();
+      });
+      box.appendChild(div);
+    });
+  }
+
+  function renderDeltas() {
+    var box = document.getElementById("deltas");
+    box.innerHTML = "";
+    state.result.deltas.forEach(function (d) {
+      var div = document.createElement("div");
+      div.className = "delta";
+      div.innerHTML = '<div class="tag">预算从 ' + esc(d.from) + ' 档调到 ' + esc(d.to) + ' 档，变化是什么？</div>' +
+        d.explanation.map(function (p) { return "<p>" + esc(p) + "</p>"; }).join("");
+      box.appendChild(div);
+    });
+  }
+
+  function renderMeta() {
+    var m = state.result.meta;
+    document.getElementById("metaLine").textContent =
+      "本轮候选 " + m.candidate_count + " 个（上限 " + m.max_candidates + "）· 同输入同数据结果一致 · " + m.claim;
+  }
+
+  function recalc() {
+    state.result = E.buildLadder({
+      budget_cents: state.budget,
+      order_type: state.orderType,
+      menu: SAMPLE_DATA.menu,
+      sample: SAMPLE_DATA,
+      prefs: state.prefs.slice(),
+      excluded: state.excluded.slice(),
+      must: []
+    });
+    if (state.selectedTier >= state.result.tiers.length) state.selectedTier = state.result.tiers.length - 1;
+    if (!state.result.tiers[state.selectedTier].plan) {
+      var firstPlan = state.result.tiers.findIndex(function (t) { return t.plan; });
+      if (firstPlan >= 0) state.selectedTier = firstPlan;
+    }
+    renderTiers();
+    renderDeltas();
+    renderMeta();
+  }
+
+  /* ---------- 挑战卡（Canvas PNG，本地导出，不上传） ---------- */
+  function drawCard() {
+    var W = 750, H = 1060;
+    var canvas = document.createElement("canvas");
+    canvas.width = W; canvas.height = H;
+    var g = canvas.getContext("2d");
+
+    var tier = state.result.tiers[state.selectedTier] || state.result.tiers.find(function (t) { return t.plan; });
+    if (!tier || !tier.plan) { alert("当前预算没有可行方案，先调高预算再生成挑战卡。"); return null; }
+    var plan = tier.plan, q = plan.quote;
+
+    // 背景
+    g.fillStyle = "#FFF8EE"; g.fillRect(0, 0, W, H);
+    // 顶部红条
+    g.fillStyle = "#DA291C"; g.fillRect(0, 0, W, 150);
+    g.fillStyle = "#FFC72C"; g.beginPath(); g.arc(W - 80, 30, 78, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#B7221A"; g.beginPath(); g.arc(W - 80, 30, 52, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#FFFFFF"; g.font = "700 44px -apple-system, PingFang SC, Microsoft YaHei, sans-serif";
+    g.fillText("麦麦预算挑战", 44, 68);
+    g.font = "400 22px -apple-system, PingFang SC, Microsoft YaHei, sans-serif";
+    g.fillText("McBudget · 给定预算，看看今天怎么吃", 44, 108);
+
+    // 预算大字
+    g.fillStyle = "#2B2320"; g.font = "800 30px sans-serif";
+    g.fillText("预算 ¥" + yuan(tier.budget_cents) + "（" + esc(tier.label) + " 档" + (state.orderType === "delivery" ? " · 麦乐送" : state.orderType === "dt" ? " · 得来速" : " · 到店取餐") + "）", 44, 218);
+    g.fillStyle = "#DA291C"; g.font = "800 88px sans-serif";
+    g.fillText("¥" + yuan(q.payable_cents), 44, 312);
+    g.fillStyle = "#6B5E57"; g.font = "400 24px sans-serif";
+    g.fillText("应付金额", 44 + g.measureText("¥" + yuan(q.payable_cents)).width + 20, 306);
+
+    // 三档一览
+    var y = 372;
+    g.fillStyle = "#2B2320"; g.font = "700 26px sans-serif";
+    g.fillText("预算阶梯", 44, y); y += 14;
+    state.result.tiers.forEach(function (t) {
+      y += 40;
+      var label = t.label + "（¥" + yuan(t.budget_cents) + "）";
+      var val = t.plan ? "¥" + yuan(t.plan.quote.payable_cents) + " · " + t.plan.cart.map(function (i) { return i.name; }).join("+") : "无可行方案";
+      g.fillStyle = t.plan ? "#2B2320" : "#B7221A";
+      g.font = (t === tier ? "800 " : "400 ") + "24px sans-serif";
+      g.fillText(label, 44, y);
+      g.font = "400 22px sans-serif";
+      g.fillStyle = "#6B5E57";
+      var lx = 44 + g.measureText(label).width + 18;
+      var maxW = W - 60 - lx;
+      var text = val;
+      while (g.measureText(text).width > maxW && text.length > 4) text = text.slice(0, -2);
+      if (text !== val) text += "…";
+      g.fillText(text, lx, y);
+    });
+
+    // 明细
+    y += 66;
+    g.fillStyle = "#2B2320"; g.font = "700 26px sans-serif"; g.fillText("这一档吃什么", 44, y); y += 18;
+    plan.cart.forEach(function (i) {
+      y += 40;
+      g.fillStyle = "#2B2320"; g.font = "600 24px sans-serif";
+      var name = i.name + " × " + i.qty;
+      g.fillText(name, 44, y);
+      g.fillStyle = "#6B5E57"; g.font = "400 22px sans-serif";
+      g.fillText("¥" + yuan(i.price_cents * i.qty), W - 100, y);
+      if (i.combo_items && i.combo_items.length) {
+        y += 30;
+        g.fillStyle = "#8B7E76"; g.font = "400 19px sans-serif";
+        var sub = "含 " + i.combo_items.map(function (s) { return s.name; }).join(" + ");
+        while (g.measureText(sub).width > W - 120 && sub.length > 6) sub = sub.slice(0, -2);
+        if (sub !== "含 " + i.combo_items.map(function (s) { return s.name; }).join(" + ")) sub += "…";
+        g.fillText(sub, 60, y);
+      }
+    });
+
+    // 金额
+    y += 58;
+    g.fillStyle = "#EADFCB"; g.fillRect(44, y, W - 88, 2); y += 40;
+    function line(label, val, opts) {
+      opts = opts || {};
+      g.fillStyle = opts.strong ? "#2B2320" : "#6B5E57";
+      g.font = (opts.strong ? "700 " : "400 ") + "24px sans-serif";
+      g.fillText(label, 44, y);
+      g.fillStyle = opts.color || "#2B2320";
+      g.font = (opts.strong ? "800 " : "600 ") + "26px sans-serif";
+      g.fillText(val, W - 100 - g.measureText(val).width, y);
+      y += 40;
+    }
+    line("商品金额", "¥" + yuan(q.product_cents));
+    if (q.discount_cents) line("优惠" + (q.coupon ? "（" + q.coupon + "）" : ""), "-¥" + yuan(q.discount_cents), { color: "#1F7A3D" });
+    line("配送费", q.delivery_cents ? "¥" + yuan(q.delivery_cents) : "¥0");
+    line("应付金额", "¥" + yuan(q.payable_cents), { strong: true, color: "#DA291C" });
+    line("剩余预算", "¥" + yuan(tier.budget_cents - q.payable_cents));
+
+    // 底部
+    g.fillStyle = "#B7221A";
+    g.fillRect(0, H - 96, W, 96);
+    g.fillStyle = "#FFFFFF"; g.font = "700 24px sans-serif";
+    g.fillText("演示样例价格 · 非官方产品 · 以重新核价为准", 44, H - 52);
+    g.font = "400 18px sans-serif";
+    g.fillText("生成时间：" + new Date().toLocaleString("zh-CN", { hour12: false }), 44, H - 24);
+
+    return canvas;
+  }
+
+  function showCard() {
+    var canvas = drawCard();
+    if (!canvas) return;
+    var url = canvas.toDataURL("image/png");
+    document.getElementById("cardImg").src = url;
+    document.getElementById("cardModal").classList.add("show");
+    var btn = document.getElementById("btnDownload");
+    btn.onclick = function () {
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "mcbudget-card-" + Math.round(state.budget / 100) + "yuan.png";
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+  }
+
+  /* ---------- 事件绑定 ---------- */
+  var range = document.getElementById("budgetRange");
+  var num = document.getElementById("budgetNum");
+  range.addEventListener("input", function () {
+    state.budget = parseInt(range.value, 10) * 100;
+    num.value = range.value;
+    recalc();
+  });
+  num.addEventListener("change", function () {
+    var v = Math.max(1, Math.min(99, parseInt(num.value, 10) || 25));
+    num.value = v; range.value = v;
+    state.budget = v * 100;
+    recalc();
+  });
+  document.getElementById("modePickup").addEventListener("click", function () { setMode("pickup"); });
+  document.getElementById("modeDt").addEventListener("click", function () { setMode("dt"); });
+  document.getElementById("modeDelivery").addEventListener("click", function () { setMode("delivery"); });
+  function setMode(m) {
+    state.orderType = m;
+    document.getElementById("modePickup").classList.toggle("active", m === "pickup");
+    document.getElementById("modeDt").classList.toggle("active", m === "dt");
+    document.getElementById("modeDelivery").classList.toggle("active", m === "delivery");
+    document.getElementById("deliveryNote").style.display = m === "delivery" ? "block" : "none";
+    recalc();
+  }
+  document.getElementById("btnCard").addEventListener("click", showCard);
+  document.getElementById("btnReset").addEventListener("click", function () {
+    state.prefs = []; state.excluded = []; state.budget = 2500;
+    num.value = 25; range.value = 25;
+    buildChips("prefChips", PREF_OPTIONS, false);
+    buildChips("noChips", NO_OPTIONS, true);
+    setMode("pickup");
+  });
+  document.getElementById("btnClose").addEventListener("click", function () {
+    document.getElementById("cardModal").classList.remove("show");
+  });
+  document.getElementById("cardModal").addEventListener("click", function (e) {
+    if (e.target === this) this.classList.remove("show");
+  });
+
+  buildChips("prefChips", PREF_OPTIONS, false);
+  buildChips("noChips", NO_OPTIONS, true);
+  recalc();
+
+  /* 自测钩子：URL 带 #autotest 时自动执行挑战卡绘制并输出结果（供自动化验收用） */
+  if (location.hash === "#autotest") {
+    var __out;
+    try {
+      var __canvas = drawCard();
+      __out = "AUTOTEST:" + (__canvas ? "OK:len=" + __canvas.toDataURL("image/png").length : "NULL");
+    } catch (e) {
+      __out = "AUTOTEST:FAIL:" + (e && e.message ? e.message : String(e));
+    }
+    var __div = document.createElement("div");
+    __div.id = "autotest-result";
+    __div.textContent = __out;
+    document.body.appendChild(__div);
+  }
+})();
+</script>
+</body>
+</html>

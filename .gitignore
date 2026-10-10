@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+.workbuddy/
+*.log
+tmp*/
+scripts/order_check.json
+scripts/lean_quotes.json
+scripts/*smoke*.json
+scripts/*_result*.json
+dist/
