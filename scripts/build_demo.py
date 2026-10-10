@@ -38,12 +38,11 @@ def main() -> int:
 
     size = os.path.getsize(out_path)
     print(f"已生成 {out_path}（{size / 1024:.1f} KB，自包含）")
-    # 校验：不允许出现外网资源引用
+    # 检查潜在外网依赖；说明链接和社交预览元数据本身不触发资源请求。
     for bad in ("http://", "https://", "fetch(", "XMLHttpRequest"):
         if bad in html.replace("https://m-sit", ""):
-            # 模板中允许出现的说明性 URL 只存在于注释里；正文含协议头则检查是否在注释
             occurrences = [i for i in range(len(html)) if html.startswith(bad, i)]
-            print(f"提示：文本中出现 {bad!r} {len(occurrences)} 处，请确认全部位于注释或免责文案")
+            print(f"提示：文本中出现 {bad!r} {len(occurrences)} 处，请确认属于说明链接、注释或分享元数据，而非运行时外网依赖")
     return 0
 
 

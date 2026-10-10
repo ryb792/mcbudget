@@ -7,7 +7,7 @@
 - 地址 `https://mcp.mcd.cn`，协议 Streamable HTTP，请求头 `Authorization: Bearer <MCP Token>`。
 - Token 在 open.mcd.cn 控制台申请；限流 600 次/分钟，超限返回 429。
 - 401 = Token 无效/过期/未提供；429 = 限流。
-- WorkBuddy、Codex 等客户端的安装和配置见 `../README.md`；JSON 客户端参考 `../mcp-config.example.json`，Codex 参考 `../mcp-config.codex.example.toml`。工具名前缀与配置格式以当前客户端为准。
+- WorkBuddy、Codex 等客户端的安装和配置见 `../docs/GETTING_STARTED.md`；JSON 客户端参考 `../mcp-config.example.json`，Codex 参考 `../mcp-config.codex.example.toml`。工具名前缀与配置格式以当前客户端为准。
 
 ## 金额单位陷阱（最重要）
 

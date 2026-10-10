@@ -4,10 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>麦麦预算挑战 McBudget · 演示</title>
+<meta name="description" content="体验麦麦预算挑战 McBudget：比较 B−5、B、B+5 三档餐单，查看预算增减解释并生成 PNG 挑战卡。页面使用固定样例价格；真实模式可在 WorkBuddy、Codex 等 MCP 客户端中使用 Skill。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="McBudget · 麦麦预算挑战">
+<meta property="og:description" content="给定预算，看看今天怎么吃。体验 B±5 餐单、增减解释与 PNG 分享卡；演示使用固定样例价格。">
+<meta property="og:url" content="https://ryb792.github.io/mcbudget/demo/">
+<meta property="og:image" content="https://ryb792.github.io/mcbudget/assets/readme/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="McBudget 麦麦预算挑战：B−5、B、B+5 预算阶梯，支持 WorkBuddy、Codex 等 MCP 客户端。">
+<meta name="twitter:card" content="summary_large_image">
 <!--
   McBudget 演示页（自包含，双击即可打开，无外网请求、无 fetch、无服务器）。
   数据与引擎由 scripts/build_demo.py 从 assets/sample_data.json 与 scripts/engine.js 内联生成。
   本页所有价格均为演示样例，永久标记"演示样例价格"；不发起任何真实领券、下单或支付。
+  head 中的分享预览 URL 仅供链接分享平台读取，本页不加载这些远程资源。
 -->
 <style>
   :root {
@@ -357,9 +368,11 @@ var SAMPLE_DATA = /*__SAMPLE_DATA__*/null;
     g.fillStyle = "#2B2320"; g.font = "800 30px sans-serif";
     g.fillText("预算 ¥" + yuan(tier.budget_cents) + "（" + esc(tier.label) + " 档" + (state.orderType === "delivery" ? " · 麦乐送" : state.orderType === "dt" ? " · 得来速" : " · 到店取餐") + "）", 44, 218);
     g.fillStyle = "#DA291C"; g.font = "800 88px sans-serif";
-    g.fillText("¥" + yuan(q.payable_cents), 44, 312);
+    var payableText = "¥" + yuan(q.payable_cents);
+    var payableWidth = g.measureText(payableText).width;
+    g.fillText(payableText, 44, 312);
     g.fillStyle = "#6B5E57"; g.font = "400 24px sans-serif";
-    g.fillText("应付金额", 44 + g.measureText("¥" + yuan(q.payable_cents)).width + 20, 306);
+    g.fillText("应付金额", 44 + payableWidth + 20, 306);
 
     // 三档一览
     var y = 372;
