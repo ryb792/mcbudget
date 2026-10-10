@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """McBudget 连接检查（首次使用引导，只读、零依赖）。
 
-检测本机麦当劳 MCP 配置状态并给出对应的安装/绑定引导：
+检测本机麦当劳 MCP 凭据状态，为 WorkBuddy、Codex 等客户端给出安装/绑定引导：
   not_configured        未找到 mcd-mcp 配置 → 引导申请 Token + 配置连接器
   placeholder           配置存在但 Token 仍是占位符 → 引导替换 Token
   configured            配置与 Token 就绪（未验证有效性）
@@ -11,13 +11,16 @@
   network_error         网络不可达 → 检查网络/代理
 
 检测位置（按序）：
-  1. 环境变量 MCD_MCP_TOKEN
-  2. ~/.workbuddy/mcp.json 的 mcpServers.mcd-mcp.headers.Authorization（Bearer xxx）
+  1. 环境变量 MCD_MCP_TOKEN（跨客户端首选）
+  2. --config 指定的 MCP JSON，或兼容回退 ~/.workbuddy/mcp.json
+     JSON 凭据字段为 mcpServers.mcd-mcp.headers.Authorization（Bearer xxx）。
+     Codex 使用 bearer_token_env_var=MCD_MCP_TOKEN，配置示例见 README.md；
+     本脚本不自动扫描 Codex TOML，也不判定客户端是否已经加载 MCP 工具。
 
 用法：
   python scripts/check_mcp.py                 # 只查本地配置，不发网络请求
   python scripts/check_mcp.py --probe         # 额外直连 mcp.mcd.cn 验证 Token（一次 now-time-info）
-  python scripts/check_mcp.py --config PATH   # 指定配置文件（默认 ~/.workbuddy/mcp.json）
+  python scripts/check_mcp.py --config PATH   # 指定 MCP JSON（未指定时兼容 WorkBuddy 路径）
 
 隐私：脚本永不打印 Token 内容，只输出"是否配置/形态是否为占位符"。
 """
@@ -77,12 +80,11 @@ def load_local_config(config_path: str | None = None) -> dict:
 
 GUIDE_STEPS = [
     "① 申请 Token：手机号登录 https://open.mcd.cn → 右上角【控制台】→ 激活 → 同意协议 → 一键复制 MCP Token（此步即完成账户绑定）。",
-    "② 配置 WorkBuddy：左侧【专家·技能·连接器】→【连接器】→ 右上角【自定义连接器】→【配置 MCP】→ 粘贴下方 JSON 并把 ${MCD_MCP_TOKEN} 替换为你的 Token → 保存。",
-    "   {\"mcpServers\":{\"mcd-mcp\":{\"type\":\"streamablehttp\",\"url\":\"https://mcp.mcd.cn\",\"headers\":{\"Authorization\":\"Bearer 你的Token\"}}}}",
-    "③ 启用：回到自定义连接器列表，将 mcd-mcp【启用】（新写入的配置需在连接器管理页点【信任】激活）。",
-    "④ 回到对话说一声『检查麦当劳 MCP』，我会重新检测并开始真实模式。",
+    "② 本地凭据：优先设置环境变量 MCD_MCP_TOKEN，供跨客户端脚本读取；新设置后需重新启动相应终端或客户端。不要将 Token 发到对话或写入代码。",
+    "③ 配置客户端：服务地址 https://mcp.mcd.cn。WorkBuddy、Codex 等客户端的配置字段不同，请按 README.md 中相应示例操作；Codex 通过 bearer_token_env_var 引用 MCD_MCP_TOKEN。",
+    "④ 启用客户端中的麦当劳 MCP 服务，按当前客户端提示完成信任/连接；回到对话确认工具可用。脚本 --probe 只验证凭据与服务响应，不代表客户端已加载工具。",
 ]
-GUIDE_AGENT_NOTE = "请在本机 WorkBuddy 连接器或环境变量中配置 Token，不要向对话发送 Token。"
+GUIDE_AGENT_NOTE = "请在本机客户端设置或环境变量中配置 Token，不要向对话发送 Token。WorkBuddy JSON 仍可兼容回退；Codex 配置方法见 README.md。"
 
 PROBE_BODY = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                          "params": {"name": "now-time-info", "arguments": {}}}).encode("utf-8")
@@ -164,7 +166,7 @@ def probe_token(token: str, timeout: int = 20) -> dict:
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         return {"ok": False, "status": "network_error", "http_code": None, "message": f"网络不可达：{str(e)[:120]}。请检查网络或代理后重试。"}
     if code == 200 and _probe_body_verified(body):
-        return {"ok": True, "status": "verified", "http_code": 200, "message": "连接成功，麦当劳 MCP 可用，可进入真实模式。"}
+        return {"ok": True, "status": "verified", "http_code": 200, "message": "凭据与麦当劳 MCP 服务响应验证通过；还需确认当前客户端已加载麦当劳 MCP 工具。"}
     return {"ok": False, "status": "network_error", "http_code": code, "message": "服务响应异常，请稍后重试。"}
 
 
@@ -180,7 +182,7 @@ def classify(local: dict, do_probe: bool, config_path: str | None) -> dict:
         return out
     if not do_probe:
         out["status"] = "configured"
-        out["message"] = "本地配置与 Token 就绪（未验证有效性）。加 --probe 可直连验证，或直接在对话中发起预算挑战（首次调用失败会按错误状态提示）。"
+        out["message"] = "本机已发现 Token（未验证有效性）。加 --probe 可直连验证；还需按 README.md 配置当前客户端，并确认对话中可发现麦当劳 MCP 工具。"
         return out
     token = os.environ.get("MCD_MCP_TOKEN", "").strip()
     if not token:
@@ -199,7 +201,7 @@ def classify(local: dict, do_probe: bool, config_path: str | None) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser(description="McBudget 麦当劳 MCP 连接检查")
     ap.add_argument("--probe", action="store_true", help="直连 mcp.mcd.cn 验证 Token（一次 now-time-info）")
-    ap.add_argument("--config", default=None, help="MCP 配置文件路径（默认 ~/.workbuddy/mcp.json）")
+    ap.add_argument("--config", default=None, help="MCP JSON 路径（环境变量优先；默认兼容 ~/.workbuddy/mcp.json；Codex 示例见 README.md）")
     args = ap.parse_args()
 
     local = load_local_config(args.config)

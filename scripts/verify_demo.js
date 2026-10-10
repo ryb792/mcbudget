@@ -1,13 +1,30 @@
-/* 演示页交互验收（Playwright + 系统 Chrome，headless）：
+/* 演示页交互验收（Playwright + 本机已有 Chromium/Chrome，headless）：
  * 1) 三档渲染与金额断言  2) 滑块与数字输入联动  3) 到店/外送切换
  * 4) PNG 挑战卡导出（modal 预览 dataURL）  5) 手机宽度布局
- * 运行：NODE_PATH=<workspace>/node_modules node scripts/verify_demo.js
+ * 运行：node scripts/verify_demo.js [--browser <浏览器可执行文件>]
+ * 也可设置 MCBUDGET_BROWSER_PATH；缺省时使用 Playwright 的现有浏览器。
+ * 若使用已有外部依赖，可用 NODE_PATH 指向其 node_modules；脚本不安装依赖或浏览器。
  */
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
+const { pathToFileURL } = require("url");
 
-const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
-const DEMO = "file:///" + encodeURI("Z:/Ruanjian/WorkBuddy_data/麦当劳/mcbudget/demo/index.html").replace(/%25/g, "%");
-const SHOT_DIR = "C:/Users/83705/AppData/Local/Temp";
+let browserPath = process.env.MCBUDGET_BROWSER_PATH || "";
+const args = process.argv.slice(2);
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === "--help") {
+    console.log("用法：node scripts/verify_demo.js [--browser <浏览器可执行文件>]\n也可设置 MCBUDGET_BROWSER_PATH；使用现有 playwright-core 和浏览器，不自动安装。");
+    process.exit(0);
+  }
+  if (args[i] !== "--browser" || !args[i + 1] || args[i + 1].startsWith("--")) {
+    console.error("参数错误：使用 --browser <浏览器可执行文件>，或 --help 查看用法。");
+    process.exit(2);
+  }
+  browserPath = args[++i];
+}
+const DEMO = pathToFileURL(path.resolve(__dirname, "../demo/index.html")).href;
+let SHOT_DIR;
 
 let pass = 0;
 const fails = [];
@@ -18,7 +35,10 @@ function check(name, cond, detail) {
 
 (async () => {
   const { chromium } = require("playwright-core");
-  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: ["--no-sandbox"] });
+  const launchOptions = { headless: true, args: ["--no-sandbox"] };
+  if (browserPath) launchOptions.executablePath = path.resolve(browserPath);
+  const browser = await chromium.launch(launchOptions);
+  SHOT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "mcbudget-demo-"));
 
   // ---------- 桌面 ----------
   const page = await browser.newPage({ viewport: { width: 1280, height: 1400 } });
@@ -104,6 +124,7 @@ function check(name, cond, detail) {
   await mobile.screenshot({ path: path.join(SHOT_DIR, "demo_mobile_pw.png"), fullPage: true });
 
   await browser.close();
+  console.log("截图目录：" + SHOT_DIR);
   console.log(fails.length ? `\n结果：${pass} 通过，${fails.length} 失败 -> ${fails}` : `\n结果：全部 ${pass} 项通过`);
   process.exit(fails.length ? 1 : 0);
 })().catch((e) => { console.error("RUNNER ERROR:", e); process.exit(2); });

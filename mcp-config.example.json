@@ -2,7 +2,8 @@
   "_说明": "麦当劳 MCP 连接配置示例。文件中仅使用环境变量占位符，不含真实 Token（参赛声明要求）。",
   "_占位符": "MCD_MCP_TOKEN 为你的麦当劳 MCP Token 变量名，请在 open.mcd.cn 控制台申请。",
   "_用法1_WorkBuddy": "WorkBuddy 连接器配置界面通常不做环境变量展开：复制下方 mcpServers 内容，把 ${MCD_MCP_TOKEN} 整体替换为你的实际 Token 后粘贴保存。Token 属于敏感凭证，不要把它提交到 Git、写进源码或贴到对话中。",
-  "_用法2_支持env展开的MCP客户端": "若你的 MCP 客户端支持环境变量展开，可先设置环境变量 MCD_MCP_TOKEN，再原样使用下方配置。",
+  "_用法2_支持env展开的MCP客户端": "若你的 MCP 客户端支持环境变量展开，可先设置环境变量 MCD_MCP_TOKEN，再原样使用下方配置；传输类型名称以客户端要求为准。",
+  "_用法3_Codex": "Codex 使用 TOML 配置，参考 mcp-config.codex.example.toml 和 README.md；bearer_token_env_var 引用环境变量 MCD_MCP_TOKEN，不要将此 JSON 直接粘贴为 Codex 配置。",
   "_限流": "每个 Token 每分钟最多 600 次请求（官方限制），超限返回 429。",
   "mcpServers": {
     "mcd-mcp": {

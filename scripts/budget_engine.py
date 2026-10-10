@@ -4,7 +4,7 @@
 
 同一份算法与数据约定同时服务两种模式，避免"演示与真实计算含义不同"：
 - 演示模式：quote_fn 为空，使用 assets/sample_data.json 的样例优惠规则估算，所有方案状态为 demo_sample。
-- 真实模式：调用方（WorkBuddy 对话中的麦当劳 MCP）把 query-meals/calculate-price 的返回适配成本引擎的
+- 真实模式：调用方（WorkBuddy、Codex 等支持 MCP 的客户端）把 query-meals/calculate-price 的返回适配成本引擎的
   输入契约，并通过 quote_fn 提交真实报价（≤12 个去重购物车），方案状态为 priced / quote_failed / estimated。
 
 硬约束（与 SKILL.md 一致）：

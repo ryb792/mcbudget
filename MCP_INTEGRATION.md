@@ -7,9 +7,9 @@
 | 服务 | 麦当劳中国 MCP（官方远程托管） |
 | 地址 | `https://mcp.mcd.cn` |
 | 协议 | Streamable HTTP |
-| 认证 | `Authorization: Bearer <MCP Token>`（Token 由用户在 open.mcd.cn 申请，仅存于 WorkBuddy 连接器或本地环境变量） |
+| 认证 | `Authorization: Bearer <MCP Token>`（Token 由用户在 open.mcd.cn 申请，仅存于客户端本地配置或环境变量） |
 | 限流 | 600 次/分钟（429 = 超限） |
-| 配置样例 | `mcp-config.example.json`（仅环境变量占位符） |
+| 配置样例 | `mcp-config.example.json`（JSON 客户端）与 `mcp-config.codex.example.toml`（Codex），仅环境变量占位符或引用 |
 
 ## 2. 实际使用的工具与用途
 

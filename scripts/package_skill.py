@@ -6,7 +6,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 ROOT_FILES = (
     "README.md", "SKILL.md", "MCP_INTEGRATION.md", "CONTEST_DECLARATION.md",
-    "mcp-config.example.json", "workbuddy.md", "LICENSE",
+    "mcp-config.example.json", "mcp-config.codex.example.toml", "workbuddy.md", "LICENSE",
 )
 
 

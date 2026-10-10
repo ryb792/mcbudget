@@ -2,14 +2,14 @@
 
 **给定预算，看看今天怎么吃。** 用户用一句话描述预算与口味，McBudget 生成 B-5 / B / B+5 三档预算阶梯方案：每档吃什么（含套餐组成）、用当前优惠后实付多少、加 5 元或减 5 元的具体变化，并可一键导出 PNG 挑战卡；连接麦当劳 MCP 后还能完成领券、算价与真实下单。
 
-- 目标用户：普通办公用户与 WorkBuddy 用户。
-- 形态：WorkBuddy Skill（`SKILL.md` + `scripts/` + `references/` + `assets/` + `demo/`），参赛仓库与技能包同构。
+- 目标用户：普通办公用户，以及 WorkBuddy、Codex 等 AI 工具用户。
+- 形态：通用 Agent Skill（`SKILL.md` + `scripts/` + `references/` + `assets/` + `demo/`），适用于支持本地 Skill、MCP 和脚本执行的客户端；参赛仓库与技能包同构。
 - V1 范围：单人到店取餐与普通外送；预算是应付总额上限（外送计入配送费）；支持必选餐品、口味偏好、排除项；不做健康评估。
 
 ## 获取技能
 
 - 项目：https://github.com/ryb792/mcbudget
-- 技能包：https://github.com/ryb792/mcbudget/releases/download/v0.1.0/mcbudget.zip
+- 技能包：https://github.com/ryb792/mcbudget/releases/download/v0.2.0/mcbudget.zip
 - 发布检查：[docs/RELEASE_VALIDATION.md](docs/RELEASE_VALIDATION.md)
 
 ## 30 秒上手（演示，无需任何配置）
@@ -22,7 +22,7 @@
 
 > 页面永久标记"演示样例价格"：餐品参考常见品类，价格与优惠规则为固定虚构样例，不发起任何真实领券、下单或支付。
 
-## 在 WorkBuddy 中使用
+## 在 WorkBuddy、Codex 等工具中使用
 
 ### 第 0 步 · 首次使用检查（没有 MCP/Token 也能用）
 
@@ -33,16 +33,34 @@ python scripts/check_mcp.py          # 检查本机配置状态与引导（不�
 python scripts/check_mcp.py --probe  # 额外直连验证 Token 有效性（一次 now-time-info）
 ```
 
-五种状态与处理：`not_configured`（未配置）/ `placeholder`（Token 仍是占位符）→ 按脚本输出的 guide 步骤申请并配置；`configured` → 就绪；`verified` → 直连验证通过；`invalid` → Token 失效重新申请；`network_error` → 检查网络/代理。检查脚本永不回显 Token 内容。
+状态与处理：`not_configured`（未配置）/ `placeholder`（Token 仍是占位符）→ 按脚本输出的 guide 步骤申请并配置；`configured` → 已发现本地凭据，仍需验证连接；`verified` → 直连验证通过；`invalid` → Token 失效重新申请；`network_error` → 检查网络/代理。检查脚本永不回显 Token 内容。
+
+脚本优先读取环境变量 `MCD_MCP_TOKEN`，也兼容 WorkBuddy 本地 JSON 配置。其他客户端可使用环境变量，或通过 `--config` 指定兼容的 JSON 配置；脚本不会自动读取 Codex 的 TOML 配置。客户端已暴露麦当劳 MCP 工具时，技能优先直接使用这些工具。
 
 ### 第 1 步 · 申请 Token 并绑定账户（一次性）
 
 1. 手机号登录 https://open.mcd.cn （此步即完成麦当劳账户绑定）；
 2. 右上角【控制台】→ 激活 → 同意服务协议 → 一键复制 MCP Token。
 
-### 第 2 步 · 导入技能
+### 第 2 步 · 安装技能
+
+**WorkBuddy**
 
 打开 WorkBuddy → 左侧边栏【专家·技能·连接器】→【技能】→ 添加技能 → **上传技能** → 选择 `mcbudget.zip`（打包方式见下）→ 导入后保持启用。
+
+**Codex**
+
+解压 `mcbudget.zip`，把完整的 `mcbudget/` 文件夹放到用户技能目录 `~/.agents/skills/mcbudget/`，或当前项目的 `.agents/skills/mcbudget/`。目录内应直接包含 `SKILL.md`；不要只复制该文件。随后在 Codex 中输入：
+
+```text
+$mcbudget 帮我挑战 25 元午饭，到店取餐，想吃鸡肉汉堡。
+```
+
+若技能没有出现在列表中，重新打开会话或重启客户端。目录与调用方式见 [Codex 官方 Skill 文档](https://learn.chatgpt.com/docs/build-skills)。
+
+**其他支持 Skill 的客户端**
+
+按客户端的技能导入方式安装同一文件夹，保持 `SKILL.md` 与资源的相对路径。真实模式还需支持 Streamable HTTP MCP 和本地 Python 脚本执行；演示页可独立打开。
 
 技能包打包（本仓库根目录即技能包根目录）：
 
@@ -53,9 +71,21 @@ python scripts/package_skill.py
 
 ### 第 3 步 · 配置 MCP 连接（真实模式）
 
-1. 到 https://open.mcd.cn 用手机号登录，控制台 → 激活 → 申请 MCP Token；
-2. WorkBuddy →【专家·技能·连接器】→【连接器】→ 右上角【自定义连接器】→【配置 MCP】，粘贴 `mcp-config.example.json` 中的 `mcpServers` 内容，**把 `${MCD_MCP_TOKEN}` 替换为你的实际 Token** 后保存（Token 是敏感凭证：不进对话、不进 Git、不进截图）；
-3. 回到自定义连接器，启用 `mcd-mcp`。
+**WorkBuddy**：进入【专家·技能·连接器】→【连接器】→【自定义连接器】→【配置 MCP】，粘贴 `mcp-config.example.json` 中的 `mcpServers` 内容，在本机把 `${MCD_MCP_TOKEN}` 替换为实际 Token 后保存，启用 `mcd-mcp`。
+
+**Codex**：把 `mcp-config.codex.example.toml` 的配置表加入 `~/.codex/config.toml` 或项目的 `.codex/config.toml`，保留已有配置：
+
+```toml
+[mcp_servers.mcd-mcp]
+url = "https://mcp.mcd.cn"
+bearer_token_env_var = "MCD_MCP_TOKEN"
+```
+
+在启动 Codex 前，让其进程能读取本机环境变量 `MCD_MCP_TOKEN`，值为 Token 本体，不带 `Bearer ` 前缀。设置后重启客户端；CLI 可通过 `codex mcp list` 查看配置，在会话中通过 `/mcp` 查看连接。配置字段见 [Codex 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。
+
+**其他 MCP 客户端**：使用服务地址 `https://mcp.mcd.cn`、Streamable HTTP 和 `Authorization: Bearer <Token>`。JSON 示例为 `mcp-config.example.json`；传输类型名称和环境变量展开方式按客户端要求调整。
+
+Token 仅保存在本机客户端配置或环境变量中，不放入对话、Git、截图和分享卡。完成配置后，在当前客户端确认麦当劳工具可调用。
 
 未连接 MCP 时技能自动工作在演示模式；连接后按 SKILL.md 的流程走真实点餐。
 
@@ -95,11 +125,12 @@ mcbudget/
 ├── MCP_INTEGRATION.md        # MCP 工具、数据流、验证状态
 ├── CONTEST_DECLARATION.md    # 参赛声明（官方原文，未改动）
 ├── mcp-config.example.json   # MCP 配置示例（仅环境变量占位符）
+├── mcp-config.codex.example.toml # Codex 配置示例（环境变量引用）
 ├── workbuddy.md              # WorkBuddy 开发过程记录
 └── LICENSE                   # MIT（原创代码）
 ```
 
-## 已验证能力与限制
+## 已验证能力
 
 **已验证（本地自动化测试）**：
 
@@ -111,14 +142,6 @@ mcbudget/
 - 连接检查五状态判定（not_configured/placeholder/configured/verified/invalid）与引导输出、Token 不回显；
 - 套餐优先/性价比排序（偏好主餐口径、同族词扩展、覆盖度计件）、25/30/35 元真实菜单行为符合"加 5 元吃套餐"语义；
 - Python 与 JS 引擎 4 组用例输出字节级一致；演示页从解压技能包可运行。
-
-**限制（如实说明）**：
-
-- 真实链路已用 `scripts/real_smoke.py` 完成只读端到端实测（门店/菜单/12 次官方算价，见 `MCP_INTEGRATION.md` 第 6 节）；**领券与下单（写操作）未实测**，首次使用时先以最小订单验证。
-- 得来速在用户明确选择后使用相应门店和业务上下文；本次发布检查未重复进行真实得来速或外送验证。随包 real_smoke.py 支持到店和得来速，不含外送验证。
-- 内置预算引擎不会自动恢复券商品、套餐轮次或特制字段。WorkBuddy 须根据真实详情和当前工具 schema 构建完整购物车、官方核价并确认后下单；不能确认完整结构的候选不用于真实订单。套餐替换、特制、预约、随单购卡和团餐不由引擎自动构建。
-- 菜单分类基于名称关键词推断（套餐/饮品/小食），个别新品可能被归为 other 而不参与自动组合，不影响已识别商品的算价正确性。
-- 演示优惠规则是简化的单券模型；真实优惠以官方算价结果为准。
 
 ## 许可与声明
 

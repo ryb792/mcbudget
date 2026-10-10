@@ -164,7 +164,7 @@
 
   <footer>
     本页为 McBudget 技能的演示模式：所有餐品、价格与优惠规则均为固定样例（见页面源码内嵌数据），仅用于体验
-    预算阶梯、增减解释与挑战卡导出，不发起任何真实领券、下单或支付。真实模式需在 WorkBuddy 中连接麦当劳
+    预算阶梯、增减解释与挑战卡导出，不发起任何真实领券、下单或支付。真实模式需在 WorkBuddy、Codex 等客户端中连接麦当劳
     MCP，由对话流程完成门店、菜单、算价、确认与下单，最终金额以官方算价为准。演示卡永久标记"演示样例价格"。
     麦当劳及相关标识为麦当劳公司商标，本演示与其无关联。
   </footer>
@@ -456,7 +456,9 @@
     return "B" + (tb < budget ? "-" : "+") + String(+diff.toFixed(2));
   }
 
-  /* 演示模式 buildLadder（与 Python 版 demo 路径同构） */
+  /* 演示模式 buildLadder（与 Python 版 demo 路径同构）。
+   * 此处没有真实报价分支；Python 的真实模式仅用成功的官方报价判断预算。
+   */
   function buildLadder(ctx) {
     var budget = ctx.budget_cents;
     var orderType = ctx.order_type || "pickup";

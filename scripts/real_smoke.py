@@ -3,8 +3,10 @@
 """McBudget 真实模式冒烟验证：直连麦当劳 MCP（Streamable HTTP）验证
 now-time-info → query-nearby-stores → query-meals → 预算阶梯(真实算价)。
 
-- Token 来源：环境变量 MCD_MCP_TOKEN，或 ~/.workbuddy/mcp.json 的
-  mcpServers.mcd-mcp.headers.Authorization（Bearer xxx）。脚本不打印 Token。
+- Token 来源：跨客户端首选环境变量 MCD_MCP_TOKEN；仍兼容回退到
+  ~/.workbuddy/mcp.json 的 mcpServers.mcd-mcp.headers.Authorization（Bearer xxx）。
+  WorkBuddy、Codex 等客户端的配置示例见 README.md。Codex 通过
+  bearer_token_env_var 引用该环境变量，本脚本不自动扫描其 TOML，不打印 Token。
 - 只做读操作（门店/菜单/算价），不领券、不下单。真实对话流程会在构建候选前
   先执行 auto-bind-coupons 领券（写操作），再 query-store-coupons 进入算价；
   本脚本为保持只读跳过领券步骤。
@@ -43,7 +45,7 @@ def load_token() -> str:
         m = re.match(r"Bearer\s+(.+)", auth)
         if m:
             return m.group(1).strip()
-    raise SystemExit("未找到 MCP Token：请设置环境变量 MCD_MCP_TOKEN 或在 ~/.workbuddy/mcp.json 配置 mcd-mcp")
+    raise SystemExit("未找到 MCP Token：请优先设置环境变量 MCD_MCP_TOKEN；WorkBuddy、Codex 等客户端配置见 README.md。仍兼容 ~/.workbuddy/mcp.json 的 mcd-mcp 配置。")
 
 
 def call_tool(token: str, name: str, arguments: dict) -> dict:

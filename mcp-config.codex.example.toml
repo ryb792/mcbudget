@@ -1,0 +1,6 @@
+# 将此表加入 Codex 用户或项目配置，保留已有配置。
+# 在启动客户端前设置本机环境变量 MCD_MCP_TOKEN；值为 Token 本体。
+# 仅引用环境变量，不在本文件中写入真实 Token。
+[mcp_servers.mcd-mcp]
+url = "https://mcp.mcd.cn"
+bearer_token_env_var = "MCD_MCP_TOKEN"
