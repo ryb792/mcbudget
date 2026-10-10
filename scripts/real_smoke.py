@@ -7,8 +7,8 @@ now-time-info → query-nearby-stores → query-meals → 预算阶梯(真实算
   ~/.workbuddy/mcp.json 的 mcpServers.mcd-mcp.headers.Authorization（Bearer xxx）。
   WorkBuddy、Codex 等客户端的配置示例见 README.md。Codex 通过
   bearer_token_env_var 引用该环境变量，本脚本不自动扫描其 TOML，不打印 Token。
-- 只做读操作（门店/菜单/算价），不领券、不下单。真实对话流程会在构建候选前
-  先执行 auto-bind-coupons 领券（写操作），再 query-store-coupons 进入算价；
+- 只做读操作（门店/菜单/算价），不领券、不下单。真实对话流程仅在用户请求或确认后
+  执行 auto-bind-coupons 领券（写操作），再 query-store-coupons 进入算价；
   本脚本为保持只读跳过领券步骤。
 - 城市与门店可传参覆盖；默认沿用开发时实测的肇庆市端州区门店。
 

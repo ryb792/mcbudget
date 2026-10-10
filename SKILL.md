@@ -68,11 +68,11 @@ description: 麦麦预算挑战：用户给一个预算（如 25 元）和口味
 # 演示模式：25 元、到店、想吃鸡肉、不要咖啡
 python scripts/budget_engine.py --budget 25 --sample-data assets/sample_data.json --pref 鸡肉 --exclude 咖啡
 
-# 真实模式：构造 ctx JSON（budget_cents/order_type/menu/prefs/excluded/must），quote_fn 由 MCP 会话注入：
-#   先 adapt_query_meals(menu) 适配菜单 → build_ladder(ctx, quote_fn)，
-#   quote_fn 内对每个购物车调用 calculate-price 并用 adapt_quote 适配返回。
-python scripts/budget_engine.py --input ctx.json
 ```
+
+真实模式使用 Python 接口 `build_ladder(ctx, quote_fn=quote_fn)`：先用 `adapt_query_meals` 适配真实菜单，由调用方提交完整购物车至 `calculate-price`，再用 `adapt_quote` 转换官方返回。`--input` 命令不会连接 MCP 或注入报价回调，不能作为真实核价入口。
+
+若客户端只能在对话中逐次调用 MCP，先通过一个记录候选购物车并返回 `None` 的回调收集本轮最多 12 个购物车，逐个完成官方核价，再用按 `cart_signature` 查找本轮报价的回调重新运行 `build_ladder`。两次运行保持同一输入与门店/方式/时段上下文；缺失或失败的报价返回 `None`，首轮收集结果不作为真实推荐。程序化回调示例见 `scripts/real_smoke.py`。
 
 自检：`python scripts/run_tests.py`（93 项，含连接检查与真实报价状态回归）与 `python scripts/test_engine_parity.py`（Python/JS 引擎一致性）。测试时隔离 MCD_MCP_TOKEN 环境变量，避免真实本机配置干扰。改动引擎后必须重跑。
 

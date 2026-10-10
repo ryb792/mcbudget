@@ -9,7 +9,7 @@
 ## 获取技能
 
 - 项目：https://github.com/ryb792/mcbudget
-- 技能包：https://github.com/ryb792/mcbudget/releases/download/v0.2.0/mcbudget.zip
+- 技能包：https://github.com/ryb792/mcbudget/releases/download/v0.2.1/mcbudget.zip
 - 发布检查：[docs/RELEASE_VALIDATION.md](docs/RELEASE_VALIDATION.md)
 
 ## 30 秒上手（演示，无需任何配置）
