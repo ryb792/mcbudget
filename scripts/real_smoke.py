@@ -22,6 +22,8 @@ import json
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -48,7 +50,7 @@ def load_token() -> str:
     raise SystemExit("未找到 MCP Token：请优先设置环境变量 MCD_MCP_TOKEN；WorkBuddy、Codex 等客户端配置见 docs/GETTING_STARTED.md。仍兼容 ~/.workbuddy/mcp.json 的 mcd-mcp 配置。")
 
 
-def call_tool(token: str, name: str, arguments: dict) -> dict:
+def call_tool(token: str, name: str, arguments: dict, timeout: float = 60) -> dict:
     _ID[0] += 1
     body = json.dumps({
         "jsonrpc": "2.0", "id": _ID[0], "method": "tools/call",
@@ -62,7 +64,7 @@ def call_tool(token: str, name: str, arguments: dict) -> dict:
             "Authorization": f"Bearer {token}",
         },
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw = resp.read().decode("utf-8", errors="replace")
     payload = raw.strip()
     # 兼容 SSE（data: {...}）与纯 JSON 两种返回
@@ -114,18 +116,34 @@ def main() -> int:
     ap.add_argument("--keyword", default="端州三路")
     ap.add_argument("--store-code", default=None, help="跳过门店查询，直接用该门店")
     ap.add_argument("--be-code", default=None)
+    ap.add_argument("--quote-limit", type=int, choices=range(1, 13), default=6,
+                    help="默认核价最多6个候选；更多选择用12")
+    ap.add_argument("--timeout", type=float, default=60,
+                    help="单次只读请求超时秒数，默认60；慢链路排查时可自行缩短")
     args = ap.parse_args()
+    if args.timeout <= 0:
+        ap.error("--timeout 必须大于0")
 
     token = load_token()
+    started = time.perf_counter()
+    timings = []
+
+    def request(name, arguments):
+        begin = time.perf_counter()
+        try:
+            return call_tool(token, name, arguments, timeout=args.timeout)
+        finally:
+            timings.append({"tool": name, "elapsed_seconds": round(time.perf_counter() - begin, 3)})
+
     print("== 1. now-time-info ==")
-    t = call_tool(token, "now-time-info", {})
+    t = request("now-time-info", {})
     print((t["_text"] or "")[:200])
 
     store_code, be_code = args.store_code, args.be_code
     be_type = "5" if args.order_type == "dt" else "1"
     if not store_code:
         print(f"\n== 2. query-nearby-stores(city={args.city}, keyword={args.keyword}, beType={be_type}) ==")
-        res = call_tool(token, "query-nearby-stores", {
+        res = request("query-nearby-stores", {
             "searchType": "2", "beType": be_type, "city": args.city, "keyword": args.keyword,
         })
         stores = unwrap(res)
@@ -140,7 +158,7 @@ def main() -> int:
     qm_args = {"storeCode": store_code, "orderType": "1", "beType": be_type}
     if be_code:
         qm_args["beCode"] = be_code
-    res = call_tool(token, "query-meals", qm_args)
+    res = request("query-meals", qm_args)
     data = unwrap(res)
     menu = be.adapt_query_meals(data)
     if not menu:
@@ -158,6 +176,7 @@ def main() -> int:
         "excluded": args.exclude,
         "must": args.must,
         "delivery_fee_cents": 0,  # 真实配送费由 calculate-price 返回，不预设
+        "quote_limit": args.quote_limit,
     }
 
     quote_stats = {"calls": 0, "failed": 0}
@@ -169,15 +188,29 @@ def main() -> int:
             cp_args["beCode"] = be_code
         quote_stats["calls"] += 1
         try:
-            qdata = unwrap(call_tool(token, "calculate-price", cp_args))
+            qdata = unwrap(request("calculate-price", cp_args))
             return be.adapt_quote(qdata, cart)
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403, 429) or e.code >= 500:
+                quote_stats["failed"] += 1
+                raise be.QuoteBatchAborted() from e
+            quote_stats["failed"] += 1
+            print(f"  [quote_failed] HTTP {e.code}")
+            return None
+        except (urllib.error.URLError, TimeoutError):
+            quote_stats["failed"] += 1
+            raise be.QuoteBatchAborted() from None
         except Exception as e:  # noqa: BLE001 —— 单次核价失败标记 quote_failed，不中断
             quote_stats["failed"] += 1
             print(f"  [quote_failed] {be.cart_signature(cart)}: {str(e)[:160]}")
             return None
 
     result = be.build_ladder(ctx, quote_fn=quote_fn)
+    result["timing"] = {"total_seconds": round(time.perf_counter() - started, 3), "calls": timings}
     print(f"候选 {result['meta']['candidate_count']} 个；官方算价 {quote_stats['calls']} 次（失败 {quote_stats['failed']}）")
+    print(f"只读检查总耗时 {result['timing']['total_seconds']} 秒；核价等待 {sum(t['elapsed_seconds'] for t in timings if t['tool'] == 'calculate-price'):.3f} 秒")
+    if result["meta"].get("quote_aborted"):
+        print(result["meta"]["note"])
     for tier in result["tiers"]:
         if tier.get("plan"):
             q = tier["plan"]["quote"]

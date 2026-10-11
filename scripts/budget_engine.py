@@ -3,7 +3,7 @@
 """McBudget 确定性预算引擎。
 
 调用方（WorkBuddy、Codex 等支持 MCP 的客户端）把当前 query-meals/calculate-price
-返回适配成本引擎的输入契约，并通过 quote_fn 提交官方报价（≤12 个去重购物车）。
+返回适配成本引擎的输入契约，并通过 quote_fn 提交官方报价（默认 6，最多 12 个去重购物车）。
 没有报价回调时拒绝计算；菜单估算只安排核价顺序，不作为可行方案。
 
 硬约束（与 SKILL.md 一致）：
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 from decimal import ROUND_HALF_UP, Decimal
+from heapq import nsmallest
 from itertools import product as iter_product
 from typing import Any, Callable, Optional
 
@@ -27,8 +28,13 @@ CARRY_OVER_STATUS = "carry_over"
 UNSOLVABLE_STATUS = "unsolvable"
 
 MAX_CANDIDATES = 30
+DEFAULT_QUOTE_CALLS = 6
 MAX_QUOTE_CALLS = 12
 TIER_STEP_CENTS = 500  # 默认 5 元
+
+
+class QuoteBatchAborted(RuntimeError):
+    """回调遇到鉴权、限流或整批网络故障时抛出，停止本批剩余核价。"""
 
 
 # ---------------------------------------------------------------------------
@@ -243,44 +249,38 @@ def generate_candidates(
     drinks = [m for m in menu if m.get("category") == "drink" and not item_matches_exclusion(m, excluded)]
     prefs = expand_prefs(prefs)
 
-    raw: list[list[dict]] = []
-
     def cart_item(m: dict, qty: int = 1) -> dict:
         return {"code": m["code"], "name": m["name"], "qty": qty, "price_cents": m["price_cents"], "category": m.get("category", "other"), "tags": list(m.get("tags", [])), "combo_items": m.get("combo_items", [])}
 
-    # 套餐购物车
-    for c in combos:
-        raw.append([cart_item(c)])
-    # 汉堡 × 0/1 小食 × 0/1 饮品
-    for b, s, d in iter_product(mains, [None] + snacks, [None] + drinks):
-        cart = [cart_item(b)]
-        if s is not None:
-            cart.append(cart_item(s))
-        if d is not None:
-            cart.append(cart_item(d))
-        raw.append(cart)
+    def raw_candidates():
+        for c in combos:
+            yield [cart_item(c)]
+        for b, s, d in iter_product(mains, [None] + snacks, [None] + drinks):
+            cart = [cart_item(b)]
+            if s is not None:
+                cart.append(cart_item(s))
+            if d is not None:
+                cart.append(cart_item(d))
+            yield cart
 
-    # 必选过滤
-    raw = [c for c in raw if not violates_must(c, must)]
+    def ranked_candidates():
+        seen: set[str] = set()
+        for cart in raw_candidates():
+            if violates_must(cart, must):
+                continue
+            sig = cart_signature(cart)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            key = (
+                -sum(pref_hits(i, prefs) for i in cart),
+                0 if has_combo_item(cart) else 1,
+                len(cart), sig,
+            )
+            yield key, cart
 
-    # 去重（签名）
-    seen: dict[str, list[dict]] = {}
-    for c in raw:
-        sig = cart_signature(c)
-        if sig not in seen:
-            seen[sig] = c
-
-    # 排序后截断：偏好命中多者优先；同分下套餐优先（性价比）、件数少者贴近一人份；再按签名稳定排序（确定性）
-    ranked = sorted(
-        seen.values(),
-        key=lambda c: (
-            -sum(pref_hits(i, prefs) for i in c),
-            0 if has_combo_item(c) else 1,
-            len(c),
-            cart_signature(c),
-        ),
-    )
-    return ranked[:max_candidates]
+    # 有界堆保持原排序键与去重口径，避免保存并完整排序数万个组合。
+    return [cart for _, cart in nsmallest(max_candidates, ranked_candidates(), key=lambda entry: entry[0])]
 
 
 # ---------------------------------------------------------------------------
@@ -319,10 +319,12 @@ def coverage_score(cart: list[dict], prefs: list[list[str]], must: list[str]) ->
     return slots
 
 
-def rank_key(cart: list[dict], quote: dict, prefs: list[str], must: list[str]):
-    """代表方案排序键：偏好满足（主餐口径）↓ → 套餐优先（性价比）↓ → 覆盖度 ↓ → 实付 ↑ → 签名 ↑。"""
+def rank_key(cart: list[dict], quote: dict, prefs: list[str], must: list[str], selection: str = "balanced"):
+    """balanced 优先主餐偏好及套餐；lowest_cash 优先实付，偏好只作平局排序。"""
     pref_total = sum(pref_hits(i, prefs) for i in cart)
     combo_first = 0 if has_combo_item(cart) else 1
+    if selection == "lowest_cash":
+        return (quote["payable_cents"], -pref_total, combo_first, -coverage_score(cart, prefs, must), cart_signature(cart))
     return (-pref_total, combo_first, -coverage_score(cart, prefs, must), quote["payable_cents"], cart_signature(cart))
 
 
@@ -392,58 +394,157 @@ def _tier_budgets(budget_cents: int, step: int = TIER_STEP_CENTS) -> list[int]:
     return [b for b in (budget_cents - step, budget_cents, budget_cents + step) if b > 0]
 
 
-def build_ladder(
-    ctx: dict,
-    quote_fn: Optional[Callable[[list[dict]], Optional[dict]]] = None,
-) -> dict:
-    """构建预算阶梯。
-
-    ctx 契约：
-      budget_cents: int            应付总额上限（含配送费）
-      order_type: "pickup"|"delivery"
-      menu: [item]                 统一菜单（price_cents）
-      prefs: [str]; excluded: [str]; must: [str]
-    quote_fn 必须提交当前上下文的官方算价；返回 None 视为核价失败。
-    对话两阶段集成可以先用返回 None 的回调收集购物车，再用官方报价缓存计算。
-    "sample" 非空或 "mode" 指定为非 real 时拒绝执行。
-    """
-    if not callable(quote_fn):
-        raise ValueError("必须提供调用麦当劳 calculate-price 的 quote_fn；请先连接 MCP，不能以菜单估算替代官方核价")
+def _prepare_context(ctx: dict) -> tuple:
+    """共享真实上下文检查；不连接网络、不创建报价或缓存。"""
     if ctx.get("sample") is not None or ctx.get("mode", "real") != "real":
         raise ValueError("真实预算引擎只接受当前 MCP 菜单与官方报价上下文")
     budget = int(ctx["budget_cents"])
     order_type = ctx.get("order_type", "pickup")
     if order_type not in ("pickup", "dt", "delivery"):
         raise ValueError(f"order_type 必须是 pickup/dt/delivery，收到 {order_type!r}（就餐方式必须在选餐前确认，决定菜单上下文）")
+    quote_limit = ctx.get("quote_limit", DEFAULT_QUOTE_CALLS)
+    if type(quote_limit) is not int or not 1 <= quote_limit <= MAX_QUOTE_CALLS:
+        raise ValueError(f"quote_limit 必须是 1..{MAX_QUOTE_CALLS} 的整数，默认 {DEFAULT_QUOTE_CALLS}")
+    selection = ctx.get("selection", "balanced")
+    if selection not in ("balanced", "lowest_cash"):
+        raise ValueError("selection 必须是 balanced 或 lowest_cash")
     prefs = expand_prefs(list(ctx.get("prefs", [])))
     excluded = list(ctx.get("excluded", []))
     must = list(ctx.get("must", []))
     menu = ctx["menu"]
     candidates = generate_candidates(menu, prefs, excluded, must)
+    return budget, order_type, quote_limit, prefs, must, candidates, selection
 
-    # 菜单估算只安排核价顺序，再提交 ≤12 个去重购物车官方报价。
+
+def _ordered_quote_carts(
+    budget: int, candidates: list[list[dict]], quotes: dict[str, dict],
+    prefs: list[list[str]], must: list[str], selection: str = "balanced",
+) -> list[list[dict]]:
+    """先覆盖三档、保留低价回退，再补充备选；各调用上限共享同一前缀。"""
+    ordered: list[list[dict]] = []
+    selected: set[str] = set()
+
+    def add(cart: list[dict]) -> None:
+        sig = cart_signature(cart)
+        if sig not in selected:
+            selected.add(sig)
+            ordered.append(cart)
+
+    quality_order = sorted(
+        candidates, key=lambda c: rank_key(c, quotes[cart_signature(c)], prefs, must, selection),
+    )
+    targets = [budget] + [b for b in _tier_budgets(budget) if b != budget]
+
+    def best_for(target: int) -> Optional[list[dict]]:
+        remaining = [c for c in quality_order if cart_signature(c) not in selected]
+        feasible = [c for c in remaining if quotes[cart_signature(c)]["payable_cents"] <= target]
+        if feasible:
+            return feasible[0]
+        if remaining:
+            return min(remaining, key=lambda c: (
+                quotes[cart_signature(c)]["payable_cents"],
+                rank_key(c, quotes[cart_signature(c)], prefs, must, selection),
+            ))
+        return None
+
+    # 每档先看一项菜单估算内的优选；这些估算不会进入最终预算判断。
+    for target in targets:
+        cart = best_for(target)
+        if cart is not None:
+            add(cart)
+    if candidates:
+        # 优惠不可预测：低价回退与套餐备选同时保留，避免六项都集中在高价组合。
+        add(min(candidates, key=lambda c: (
+            quotes[cart_signature(c)]["payable_cents"], cart_signature(c),
+        )))
+        add(min(candidates, key=lambda c: (
+            -sum(pref_hits(i, prefs) for i in c),
+            0 if has_combo_item(c) else 1,
+            quotes[cart_signature(c)]["payable_cents"], cart_signature(c),
+        )))
+    while len(ordered) < min(MAX_QUOTE_CALLS, len(candidates)):
+        for target in targets:
+            if len(ordered) >= min(MAX_QUOTE_CALLS, len(candidates)):
+                break
+            cart = best_for(target)
+            if cart is not None:
+                add(cart)
+    return ordered
+
+
+def plan_quotes(ctx: dict) -> dict:
+    """只规划待核价购物车，不调用报价回调，不产生可行方案。
+
+    ctx.quote_limit 默认 6，可设为 1..12。菜单估算仅用于安排 B/B±5
+    的核价优先次序；相同上下文下 6 项恰为 12 项的前缀，便于补查。
+    cart_signature 仅是本轮简化候选的索引，不能用作完整订单或跨上下文缓存键。
+    """
+    budget, order_type, quote_limit, prefs, must, candidates, selection = _prepare_context(ctx)
+    estimates = {cart_signature(c): _estimate_for_real(c, order_type, ctx) for c in candidates}
+    carts = _ordered_quote_carts(budget, candidates, estimates, prefs, must, selection)[:quote_limit]
+    return {
+        "carts": carts, "candidate_count": len(candidates),
+        "quote_limit": quote_limit, "planned_quote_count": len(carts),
+        "max_quote_calls": MAX_QUOTE_CALLS, "selection": selection,
+    }
+
+
+def _ladder_result(
+    budget: int, order_type: str, quote_limit: int, candidates: list[list[dict]],
+    quotes: dict[str, dict], statuses: dict[str, str], prefs: list[list[str]],
+    must: list[str], quote_calls: int, selection: str = "balanced", **meta_extra: Any,
+) -> dict:
+    tiers, deltas = _select_tiers(budget, candidates, quotes, statuses, prefs, must, selection)
+    return {
+        "mode": "real", "order_type": order_type, "budget_cents": budget,
+        "tiers": tiers, "deltas": deltas,
+        "meta": {
+            "candidate_count": len(candidates), "quote_calls": quote_calls,
+            "quote_limit": quote_limit, "max_candidates": MAX_CANDIDATES,
+            "max_quote_calls": MAX_QUOTE_CALLS, "deterministic": True, "selection": selection,
+            "claim": "本轮候选中的推荐，不构成全局最便宜或穷尽全部组合的承诺",
+            **meta_extra,
+        },
+    }
+
+
+def build_ladder(
+    ctx: dict,
+    quote_fn: Optional[Callable[[list[dict]], Optional[dict]]] = None,
+) -> dict:
+    """用官方核价回调构建三档，默认 6 次，ctx.quote_limit 可扩展到 12。
+
+    ctx 包含 budget_cents、order_type（pickup/dt/delivery）、menu、prefs、
+    excluded、must，可选 quote_limit、selection。selection 默认 balanced；用户
+    明确优先少花现金时使用 lowest_cash，通过必选/排除过滤后先比较实付；
+    主餐偏好只作同价方案的平局排序。
+    quote_fn 必须返回当前上下文的官方报价。
+    异步 MCP 客户端可先调用 plan_quotes(ctx)，取真实报价后通过回调选择方案。
+    """
+    if not callable(quote_fn):
+        raise ValueError("必须提供调用麦当劳 calculate-price 的 quote_fn；请先连接 MCP，不能以菜单估算替代官方核价")
+    budget, order_type, quote_limit, prefs, must, candidates, selection = _prepare_context(ctx)
+
+    # 菜单估算只安排核价顺序；未成功核价的候选不参与方案选择。
     quotes: dict[str, dict] = {}
     statuses: dict[str, str] = {}
     quote_calls = 0
+    quote_aborted = False
 
     for cart in candidates:
         sig = cart_signature(cart)
         quotes[sig] = _estimate_for_real(cart, order_type, ctx)
         statuses[sig] = ESTIMATED_STATUS
-    ordered = sorted(
-        candidates,
-        key=lambda c: (
-            -sum(pref_hits(i, prefs) for i in c),
-            0 if has_combo_item(c) else 1,
-            quotes[cart_signature(c)]["payable_cents"],
-            cart_signature(c),
-        ),
-    )
-    for cart in ordered[:MAX_QUOTE_CALLS]:
+    ordered = _ordered_quote_carts(budget, candidates, quotes, prefs, must, selection)
+    for cart in ordered[:quote_limit]:
         sig = cart_signature(cart)
         quote_calls += 1
         try:
             res = _validated_quote(quote_fn(cart))
+        except QuoteBatchAborted:
+            statuses[sig] = QUOTE_FAILED_STATUS
+            quote_aborted = True
+            break
         except Exception:
             res = None
         if res is None:
@@ -452,22 +553,34 @@ def build_ladder(
             quotes[sig] = res
             statuses[sig] = PRICED_STATUS
 
-    tiers, deltas = _select_tiers(budget, candidates, quotes, statuses, prefs, must)
-    return {
-        "mode": "real",
-        "order_type": order_type,
-        "budget_cents": budget,
-        "tiers": tiers,
-        "deltas": deltas,
-        "meta": {
-            "candidate_count": len(candidates),
-            "quote_calls": quote_calls,
-            "max_candidates": MAX_CANDIDATES,
-            "max_quote_calls": MAX_QUOTE_CALLS,
-            "deterministic": True,
-            "claim": "本轮候选中的推荐，不构成全局最便宜或穷尽全部组合的承诺",
-        },
-    }
+    extra = {"quote_aborted": True, "note": "本批核价已停止；仅展示已获得的有效官方报价，请恢复连接或等待限流结束后再补查"} if quote_aborted else {}
+    return _ladder_result(budget, order_type, quote_limit, candidates,
+                          quotes, statuses, prefs, must, quote_calls, selection, **extra)
+
+
+def select_priced_ladder(ctx: dict, quotes_by_sig: dict[str, dict]) -> dict:
+    """仅用调用方已验证可复用的官方报价重算预算，不调用网络或报价回调。
+
+    调用方须先核对完整官方购物车、门店、业务方式、地址、时段、券状态与报价
+    时效，再把匹配本轮简化候选的报价映射传入。此函数只验证报价格式和金额；
+    不存储缓存，也不能验证这些外部条件。真实下单前仍须重新官方核价并确认。
+    """
+    if not isinstance(quotes_by_sig, dict):
+        raise ValueError("quotes_by_sig 必须是本轮已核对上下文的官方报价映射")
+    budget, order_type, quote_limit, prefs, must, candidates, selection = _prepare_context(ctx)
+    quotes: dict[str, dict] = {}
+    statuses: dict[str, str] = {}
+    reused = 0
+    for cart in candidates:
+        sig = cart_signature(cart)
+        quote = _validated_quote(quotes_by_sig.get(sig))
+        if quote is None:
+            statuses[sig] = QUOTE_FAILED_STATUS
+        else:
+            quotes[sig], statuses[sig] = quote, PRICED_STATUS
+            reused += 1
+    return _ladder_result(budget, order_type, quote_limit, candidates,
+                          quotes, statuses, prefs, must, 0, selection, cached_quote_count=reused)
 
 
 def _validated_quote(quote: Optional[dict]) -> Optional[dict]:
@@ -490,7 +603,7 @@ def _validated_quote(quote: Optional[dict]) -> Optional[dict]:
 
 def _select_tiers(
     budget: int, candidates: list[list[dict]], quotes: dict[str, dict],
-    statuses: dict[str, str], prefs: list[list[str]], must: list[str],
+    statuses: dict[str, str], prefs: list[list[str]], must: list[str], selection: str = "balanced",
 ) -> tuple[list[dict], list[dict]]:
     """从已完成核价的候选选择三档代表方案，保持排序与解释逻辑统一。"""
     def tier_label(c: int, b: int) -> str:
@@ -507,7 +620,7 @@ def _select_tiers(
         feasible = [c for c in usable_candidates if quotes[cart_signature(c)]["payable_cents"] <= tb]
         entry: dict[str, Any] = {"budget_cents": tb, "label": tier_label(tb, budget)}
         if feasible:
-            rep = min(feasible, key=lambda c: rank_key(c, quotes[cart_signature(c)], prefs, must))
+            rep = min(feasible, key=lambda c: rank_key(c, quotes[cart_signature(c)], prefs, must, selection))
             sig = cart_signature(rep)
             plan = {
                 "cart": rep,

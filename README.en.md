@@ -8,9 +8,9 @@
 
 [![Agent Skill: WorkBuddy and Codex](https://img.shields.io/badge/Agent_Skill-WorkBuddy_%C2%B7_Codex-7057D9?style=flat-square)](docs/GETTING_STARTED.md)
 [![MCD MCP: real flow confirmed by developer](https://img.shields.io/badge/MCD_MCP-real_flow_confirmed-208844?style=flat-square)](MCP_INTEGRATION.md#6-真实验证记录)
-[![Tests: 108 passed](https://img.shields.io/badge/Tests-108_passed-208844?style=flat-square)](docs/RELEASE_VALIDATION.md)
+[![Tests: 173 passed](https://img.shields.io/badge/Tests-173_passed-208844?style=flat-square)](docs/RELEASE_VALIDATION.md)
 [![Web Demo: online](https://img.shields.io/badge/Web_Demo-online-EA580C?style=flat-square)](https://ryb792.github.io/mcbudget/demo/)
-[![Release: v0.3.0](https://img.shields.io/badge/Release-v0.3.0-2563EB?style=flat-square)](https://github.com/ryb792/mcbudget/releases/latest)
+[![Release: v0.3.1](https://img.shields.io/badge/Release-v0.3.1-2563EB?style=flat-square)](https://github.com/ryb792/mcbudget/releases/latest)
 [![License: MIT original code](https://img.shields.io/badge/License-MIT_(original_code)-2563EB?style=flat-square)](LICENSE)
 
 ### [📦 Download the real Skill](https://github.com/ryb792/mcbudget/releases/latest/download/mcbudget.zip) · [🚀 Setup guide](docs/GETTING_STARTED.md) · [▶ Web demo](https://ryb792.github.io/mcbudget/demo/)
@@ -30,6 +30,7 @@ McBudget is for office lunch planning in **WorkBuddy, Codex, and other clients s
 | Lunch within a budget | Meal plans and official payable totals for B−5, B and B＋5 |
 | Decide whether an upgrade is worthwhile | Added, removed or replaced items, plus the actual payment difference |
 | Match your preferences | Required items, preferred foods and exclusions |
+| Use coupons and points | Optional savings mode: claim free coupons, compare meal-voucher redemptions, then quote eligible store coupons |
 | Order a selected plan | Coupon handling, re-quotation, order confirmation and payment-link handoff |
 | Share your budget challenge | A PNG card with meals and payment details, without personal information |
 
@@ -57,7 +58,19 @@ $mcbudget 帮我挑战 25 元午饭，到店取餐，想吃鸡肉汉堡。
 
 **Flow:** choose store and fulfillment → fetch menu and coupons → official quotation → compare tiers → confirm order → complete payment yourself.
 
-Coupon claiming changes account state and requires your request or confirmation. The developer has additionally confirmed coupon claiming, order creation and the subsequent payment flow as working; see the [verification sources](MCP_INTEGRATION.md#6-真实验证记录).
+Coupon claiming changes account state. Once you request it or enable automatic free-coupon claiming, the Skill claims at most once per conversation and refreshes store eligibility. Points redemption requires confirmation of the exact product, points cost and quantity. The developer has additionally confirmed coupon claiming, food-order creation and the subsequent payment flow as working; see the [verification sources](MCP_INTEGRATION.md#6-真实验证记录).
+
+### 💰 Optional savings mode
+
+Ask to enable savings mode and automatically claim free coupons. If you want to use points, McBudget checks your balance and relevant meal vouchers, prioritizing options with no additional cash charge, then asks you to confirm the product, points cost and quantity before redeeming. After redemption, it refreshes eligible store coupons and requests an official meal quotation. **Points remain separate from the cash payable total.** You can also ask to keep required items and prioritize lower cash payment. Paid membership cards and points lotteries are not included by default. See the [official MCP tools](https://github.com/M-China/mcd-mcp-server#3-工具列表) and [savings workflow](references/savings.md).
+
+After food-order creation, the handoff contains just **items and quantities, payable amount, store and pickup method or a short delivery-address summary, and the payment link**. Additional details appear when something changes or needs your attention.
+
+### ⚡ Get a meal plan sooner
+
+By default, McBudget selects up to **6 candidates** for official quotation before building the three budget tiers. Ask “compare more plans” for a wider search, up to 12 candidates per round. Displayed payable amounts always come from successful official quotations.
+
+Within the same conversation, keep the selected store and fulfillment method. For a budget-only change, the client first reuses quotations received within 5 minutes for the identical complete cart and business context, then quotes additional candidates when needed. It fetches details only for shortlisted items; savings mode and points comparison run when requested, as do share cards and payment QR codes. **The selected cart is still freshly quoted and confirmed before ordering.**
 
 ## 👀 Preview the experience
 
@@ -76,8 +89,14 @@ For a local web preview, download the [repository source](https://github.com/ryb
 **Can the installed Skill work without MCP?**  
 Configure and verify your connection first. It does not fall back to simulated meals or prices.
 
+**Why can the first request take longer?**  
+The workflow retrieves real stores, menus, item details and coupons, then requests official quotations. v0.3.1 reduces the default quotation candidate limit from 12 to 6 and avoids repeat queries. Actual waiting time still depends on the network, official service and client processing.
+
 **When does it order or pay?**  
 After you choose a plan, the assistant re-quotes the cart and asks for confirmation before creating an order. You complete payment through the provided link.
+
+**Does savings mode spend my points automatically?**  
+No. It first compares redemption options and waits for confirmation of the product, points cost and quantity. Newly issued vouchers must still be valid at the chosen store and included in a fresh official quotation.
 
 **What appears on a shared card?**  
 Budget, meals, payable totals and change explanations. Tokens, phone numbers, addresses, coupon codes, full order IDs and payment links are excluded.
@@ -86,6 +105,7 @@ Budget, meals, payable totals and change explanations. Tokens, phone numbers, ad
 
 - [Setup guide](docs/GETTING_STARTED.md) · [Skill workflow](SKILL.md)
 - [MCP integration and verification](MCP_INTEGRATION.md)
+- [Coupon and points savings workflow](references/savings.md)
 - [Development](docs/DEVELOPMENT.md) · [Release validation](docs/RELEASE_VALIDATION.md)
 - [Latest release](https://github.com/ryb792/mcbudget/releases/latest)
 - [Report an issue or suggest a scenario](https://github.com/ryb792/mcbudget/issues/new)

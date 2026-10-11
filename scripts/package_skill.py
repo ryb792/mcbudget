@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SKILL_FILES = (
     "SKILL.md", "MCP_INTEGRATION.md", "CONTEST_DECLARATION.md", "LICENSE",
     "mcp-config.example.json", "mcp-config.codex.example.toml",
-    "docs/GETTING_STARTED.md", "references/mcp_tools.md", "references/data_conventions.md",
+    "docs/GETTING_STARTED.md", "references/mcp_tools.md", "references/data_conventions.md", "references/savings.md",
     "scripts/budget_engine.py", "scripts/check_mcp.py", "scripts/real_smoke.py",
     "scripts/make_qr.py", "scripts/render_card.py", "assets/result_template.html",
 )

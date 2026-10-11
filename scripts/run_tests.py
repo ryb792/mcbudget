@@ -348,7 +348,7 @@ regression_menu = [
     for i in range(13)
 ]
 regression_ctx = {"budget_cents": 2500, "order_type": "pickup",
-                  "menu": regression_menu, "prefs": [], "excluded": [], "must": []}
+                  "menu": regression_menu, "prefs": [], "excluded": [], "must": [], "quote_limit": 12}
 
 
 def regression_quote(cart):
@@ -356,8 +356,9 @@ def regression_quote(cart):
 
 
 regression_priced = be.build_ladder(regression_ctx, regression_quote)
-check("未核价的高覆盖套餐不得压过已核价方案", all(
-    t.get("plan") and t["plan"]["status"] == "priced" and t["plan"]["main_code"] != "T12"
+planned_signatures = {be.cart_signature(cart) for cart in be.plan_quotes(regression_ctx)["carts"]}
+check("未核价候选不得压过已核价方案", all(
+    t.get("plan") and t["plan"]["status"] == "priced" and be.cart_signature(t["plan"]["cart"]) in planned_signatures
     for t in regression_priced["tiers"]
 ))
 regression_low = be.build_ladder({**regression_ctx, "budget_cents": 500}, regression_quote)
